@@ -56,15 +56,10 @@ int main(int argc, char** argv) {
 	int sawVideo=0;
 
 	printf("\nUltimate 64 view!\n\n");
-	UDPpacket pkg, audpkg;
-	u64msg_t u64pkg;
-	a64msg_t a64pkg;
+	UDPpacket *pkg, *audpkg;
 
-//	memset(&pkg, 0, sizeof(UDPpacket));
-//	memset(&audpkg, 0, sizeof(UDPpacket));
-
-	pkg.data = (uint8_t*)&u64pkg;
-	audpkg.data = (uint8_t*)&a64pkg;
+	pkg = SDLNet_AllocPacket(sizeof(u64msg_t));
+	audpkg = SDLNet_AllocPacket(sizeof(a64msg_t));
 
 	// Initialize SDL2
 	if (SDL_Init(SDL_INIT_VIDEO|SDL_INIT_AUDIO) != 0) {
@@ -76,7 +71,6 @@ int main(int argc, char** argv) {
 		printf("SDLNet_Init: %s\n", SDLNet_GetError());
 		return 2;
 	}
-
 
 	UDPsocket udpsock,audiosock;
 
@@ -168,15 +162,15 @@ int main(int argc, char** argv) {
 			}
 		}
 
-		int r = SDLNet_UDP_Recv(udpsock, &pkg);
+		int r = SDLNet_UDP_Recv(udpsock, pkg);
 		if(r==1) {
-			u64msg_t *p = (u64msg_t*)pkg.data;
 
 			if(!sawVideo) {
 				sawVideo=1;
 				printf("Saw data on video port: %i (won't repeat message)\n", listen);
 			}
 			
+			u64msg_t *p = (u64msg_t*)pkg->data;
 			int y = p->line & 0b0111111111111111;
 			
 			int r;
@@ -208,14 +202,14 @@ int main(int argc, char** argv) {
 			printf("SDLNet_UDP_Recv error: %s\n", SDLNet_GetError());
 		}
 
-		r = SDLNet_UDP_Recv(audiosock, &audpkg);
+		r = SDLNet_UDP_Recv(audiosock, audpkg);
 		if(r==1) {
 			if(!sawAudio) {
 				sawAudio=1;
 				printf("Saw data on audio port: %i (won't repeat message)\n", listenaudio);
 			}
 
-			a64msg_t *a = (a64msg_t*)audpkg.data;
+			a64msg_t *a = (a64msg_t*)audpkg->data;
 			SDL_QueueAudio(dev, a->sample, 192*4 );
 		} else if(r == -1) {
 			printf("SDLNet_UDP_Recv error: %s\n", SDLNet_GetError());
