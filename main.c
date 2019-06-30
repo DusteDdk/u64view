@@ -81,6 +81,8 @@ int main(int argc, char** argv) {
 	int vsyncFlag = 0;
 	int fast=1;
 
+	printf("\nUltimate 64 view!\n-----------------\n  Try -h for options.\n\n");
+
 	for(int i=1; i < argc; i++) {
 		if(strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
 			printf("\nUsage: u64view [-z N |-f] [-s] [-v] [-c]\n"
@@ -97,13 +99,15 @@ int main(int argc, char** argv) {
 				printf("Scale must be an integer larger than 0.\n");
 				return(1);
 			}
-			printf("Scaling %i\n", scale);
+			printf("Scaling %i.\n", scale);
 		} else if(strcmp(argv[i], "-f")==0) {
 			fullscreenFlag = SDL_WINDOW_FULLSCREEN_DESKTOP;
+			printf("Fullscreen on.\n");
 		}  else if(strcmp(argv[i], "-s")==0) {
 			renderFlag = SDL_RENDERER_SOFTWARE;
 		}  else if(strcmp(argv[i], "-v")==0) {
 			vsyncFlag = SDL_RENDERER_PRESENTVSYNC;
+			printf("Vsync on.\n");
 		} else if(strcmp(argv[i], "-c")==0) {
 			fast=0;
 		} else {
@@ -121,9 +125,6 @@ int main(int argc, char** argv) {
 		int pl = i & 0x0f;
 		pixMap[i] = red[ph] << (64-8) | green[ph]<< (64-16) | blue[ph] << (64-24) | (uint64_t)0xff << (64-32) | red[pl] << (32-8) | green[pl] << (32-16) | blue[pl] << (32-24) | 0xff;
 	}
-
-	printf("\nUltimate 64 view!\n-----------------\n  Try -h for options.\n\n");
-
 
 	pkg = SDLNet_AllocPacket(sizeof(u64msg_t));
 	audpkg = SDLNet_AllocPacket(sizeof(a64msg_t));
