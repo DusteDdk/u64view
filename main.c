@@ -80,17 +80,19 @@ int main(int argc, char** argv) {
 	int fullscreenFlag = 0;
 	int vsyncFlag = 0;
 	int fast=1;
+	int audioFlag=SDL_INIT_AUDIO;
 
 	printf("\nUltimate 64 view!\n-----------------\n  Try -h for options.\n\n");
 
 	for(int i=1; i < argc; i++) {
 		if(strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-			printf("\nUsage: u64view [-z N |-f] [-s] [-v] [-c]\n"
+			printf("\nUsage: u64view [-z N |-f] [-s] [-v] [-c] [-m]\n"
 					"       -z N  (default 1)   Scale the window to N times size, N must be an integer.\n"
 					"       -f    (default off) Fullscreen, will stretch.\n"
 					"       -s    (default off) Prefer software rendering, more cpu intensive.\n"
 					"       -v    (default off) Use vsync.\n"
-					"       -c    (default off) Use more versatile drawing method, more cpu intensive, can't scale.\n\n");
+					"       -c    (default off) Use more versatile drawing method, more cpu intensive, can't scale.\n"
+					"       -m    (default off) Completely turn off audio.\n\n");
 					return 0;
 		} else if(strcmp(argv[i], "-z") == 0 && i < argc+2) {
 			i++;
@@ -110,6 +112,9 @@ int main(int argc, char** argv) {
 			printf("Vsync on.\n");
 		} else if(strcmp(argv[i], "-c")==0) {
 			fast=0;
+		} else if(strcmp(argv[i], "-m")==0) {
+			audioFlag=0;
+			printf("Mute audio.\n");
 		} else {
 			printf("Unknown option '%s', try -h\n", argv[i]);
 			return 1;
@@ -130,7 +135,7 @@ int main(int argc, char** argv) {
 	audpkg = SDLNet_AllocPacket(sizeof(a64msg_t));
 
 	// Initialize SDL2
-	if (SDL_Init(SDL_INIT_VIDEO|SDL_INIT_AUDIO) != 0) {
+	if (SDL_Init(SDL_INIT_VIDEO|audioFlag) != 0) {
 		printf("SDL_Init Error: %s\n", SDL_GetError());
 		return 1;
 	}
@@ -140,6 +145,12 @@ int main(int argc, char** argv) {
 		return 2;
 	}
 
+	set=SDLNet_AllocSocketSet(2);
+	if(!set) {
+		printf("SDLNet_AllocSocketSet: %s\n", SDLNet_GetError());
+		return 4;
+	}
+
 	printf("Opening UDP socket on port %i for video...\n", listen);
 	udpsock=SDLNet_UDP_Open(listen);
 	if(!udpsock) {
@@ -147,27 +158,36 @@ int main(int argc, char** argv) {
 		return 3;
 	}
 
-	printf("Opening UDP socket on port %i for audio...\n", listenaudio);
-	audiosock=SDLNet_UDP_Open(listenaudio);
-	if(!audiosock) {
-		printf("SDLNet_UDP_Open: %s\n", SDLNet_GetError());
-		return 3;
-	}
-
-	set=SDLNet_AllocSocketSet(2);
-	if(!set) {
-		printf("SDLNet_AllocSocketSet: %s\n", SDLNet_GetError());
-		return 4;
-	}
-
 	if( SDLNet_UDP_AddSocket(set,udpsock) == -1 ) {
 		printf("SDLNet_UDP_AddSocket error: %s\n", SDLNet_GetError());
 		return 5;
 	}
 
-	if( SDLNet_UDP_AddSocket(set,audiosock) == -1 ) {
-		printf("SDLNet_UDP_AddSocket error: %s\n", SDLNet_GetError());
-		return 5;
+	if(audioFlag) {
+		printf("Opening UDP socket on port %i for audio...\n", listenaudio);
+		audiosock=SDLNet_UDP_Open(listenaudio);
+		if(!audiosock) {
+			printf("SDLNet_UDP_Open: %s\n", SDLNet_GetError());
+			return 3;
+		}
+
+		if( SDLNet_UDP_AddSocket(set,audiosock) == -1 ) {
+			printf("SDLNet_UDP_AddSocket error: %s\n", SDLNet_GetError());
+			return 5;
+		}
+
+		SDL_memset(&want, 0, sizeof(want));
+		want.freq = 48000;
+		want.format = AUDIO_S16LSB;
+		want.channels = 2;
+		want.samples = 192;
+		dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
+
+		if(dev==0) {
+			printf("Failed to open audio: %s", SDL_GetError());
+		}
+
+		SDL_PauseAudioDevice(dev, 0);
 	}
 
 
@@ -195,20 +215,6 @@ int main(int argc, char** argv) {
 		printf("Failed to lock texture for writing");
 	}
 
-
-	SDL_memset(&want, 0, sizeof(want));
-	want.freq = 48000;
-	want.format = AUDIO_S16LSB;
-	want.channels = 2;
-	want.samples = 192;
-	dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
-
-	if(dev==0) {
-		printf("Failed to open audio: %s", SDL_GetError());
-	}
-
-	SDL_PauseAudioDevice(dev, 0);
-
 	printf("\nRunning...\nPress ESC or close window to stop.\n\n");
 
 	pic(tex, width, height, pitch, pixels);
@@ -231,17 +237,19 @@ int main(int argc, char** argv) {
 		}
 
 		// Check for audio
-		r = SDLNet_UDP_Recv(audiosock, audpkg);
-		if(r==1) {
-			if(!sawaudio) {
-				sawaudio=1;
-				printf("Got data on audio port (%i) from %s:%i\n", listenaudio, intToIp(pkg->address.host),pkg->address.port );
-			}
+		if(audioFlag) {
+			r = SDLNet_UDP_Recv(audiosock, audpkg);
+			if(r==1) {
+				if(!sawaudio) {
+					sawaudio=1;
+					printf("Got data on audio port (%i) from %s:%i\n", listenaudio, intToIp(pkg->address.host),pkg->address.port );
+				}
 
-			a64msg_t *a = (a64msg_t*)audpkg->data;
-			SDL_QueueAudio(dev, a->sample, 192*4 );
-		} else if(r == -1) {
-			printf("SDLNet_UDP_Recv error: %s\n", SDLNet_GetError());
+				a64msg_t *a = (a64msg_t*)audpkg->data;
+				SDL_QueueAudio(dev, a->sample, 192*4 );
+			} else if(r == -1) {
+				printf("SDLNet_UDP_Recv error: %s\n", SDLNet_GetError());
+			}
 		}
 
 		// Check for video
@@ -317,7 +325,9 @@ int main(int argc, char** argv) {
 	}
 
 	SDL_DestroyTexture(tex);
-	SDL_CloseAudioDevice(dev);
+	if(audioFlag) {
+		SDL_CloseAudioDevice(dev);
+	}
 	SDL_DestroyRenderer(ren);
 	SDL_DestroyWindow(win);
 	SDL_Quit();
