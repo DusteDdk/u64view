@@ -8,7 +8,7 @@ all: $(EXE)
 SOURCE=*.c
 
 $(EXE): $(SOURCE)
-	$(CC) $(SOURCE) -o$(EXE) $(LDFLAGS)
+	$(CC) -O2 $(SOURCE) -o$(EXE) $(LDFLAGS)
 
 clean:
 	rm -f $(EXE) *.o

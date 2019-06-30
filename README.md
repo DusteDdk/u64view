@@ -29,9 +29,13 @@ To execute
 ==========
 ./u64view
 
+For help
+========
+./u64view -h
+
 License
 =======
-wtfl
+wtfpl
 
 Disclaimer
 ==========
