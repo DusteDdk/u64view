@@ -37,8 +37,8 @@ License
 =======
 wtfpl
 
-Disclaimer
-==========
-This was written in 2 hours, then fixed the next day  for another two hours,  and I was tired, didn'tclean it up, don't care.
+Windows ? Mac OSX ?
+===================
+I've been told that this builds and works fine on OSX, I don't know about windows, but I expect it works fine if you compile it.
 
-It does what I need, so it's done (tm).
+For Windows users there is also another Ultimate 64 viewer, called "U64 Streamer" made by Martijn Wieland (TSB), check it out at https://www.tsb.space/projects/u64-streamer/
