@@ -211,7 +211,8 @@ int main(int argc, char** argv) {
 	printf("\nRunning...\nPress ESC or close window to stop.\n\n");
 
 	pic(tex, width, height, pitch, pixels);
-	int staleVideo=7, staleAudio = 501;
+	int staleVideo=7;
+	int r;
 	while (run) {
 		while (SDL_PollEvent(&event)) {
 			switch (event.type) {
@@ -228,7 +229,22 @@ int main(int argc, char** argv) {
 			}
 		}
 
-		int r = SDLNet_UDP_Recv(udpsock, pkg);
+		// Check for audio
+		r = SDLNet_UDP_Recv(audiosock, audpkg);
+		if(r==1) {
+			if(!sawaudio) {
+				sawaudio=1;
+				printf("Got data on audio port (%i) from %s:%i\n", listenaudio, intToIp(pkg->address.host),pkg->address.port );
+			}
+
+			a64msg_t *a = (a64msg_t*)audpkg->data;
+			SDL_QueueAudio(dev, a->sample, 192*4 );
+		} else if(r == -1) {
+			printf("SDLNet_UDP_Recv error: %s\n", SDLNet_GetError());
+		}
+
+		// Check for video
+		r = SDLNet_UDP_Recv(udpsock, pkg);
 		if(r==1) {
 			if(!sawvideo) {
 				sawvideo=1;
@@ -275,21 +291,12 @@ int main(int argc, char** argv) {
 		} else {
 			staleVideo++;
 			if(staleVideo > 5) {
-				pic(tex, width, height, pitch, pixels);
+				if(staleVideo == 6) {
+					pic(tex, width, height, pitch, pixels);
+				} else if(staleVideo%10 == 0) {
+					sync=1;
+				}
 			}
-		}
-
-		r = SDLNet_UDP_Recv(audiosock, audpkg);
-		if(r==1) {
-			if(!sawaudio) {
-				sawaudio=1;
-				printf("Got data on audio port (%i) from %s:%i\n", listenaudio, intToIp(pkg->address.host),pkg->address.port );
-			}
-
-			a64msg_t *a = (a64msg_t*)audpkg->data;
-			SDL_QueueAudio(dev, a->sample, 192*4 );
-		} else if(r == -1) {
-			printf("SDLNet_UDP_Recv error: %s\n", SDLNet_GetError());
 		}
 
 		if(sync) {
@@ -305,9 +312,7 @@ int main(int argc, char** argv) {
 				SDL_RenderPresent(ren);
 			}
 		}
-		if( SDLNet_CheckSockets(set, 200) == 0) {
-			sync=1;
-		}
+		SDLNet_CheckSockets(set, 200);
 	}
 
 	SDL_DestroyTexture(tex);
