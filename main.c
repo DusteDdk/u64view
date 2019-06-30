@@ -8,6 +8,7 @@
 #include "64.h"
 
 
+
 typedef struct __attribute__((__packed__)) {
 	uint16_t seq;
 	uint16_t frame;
@@ -94,27 +95,32 @@ int main(int argc, char** argv) {
 					"       -c    (default off) Use more versatile drawing method, more cpu intensive, can't scale.\n"
 					"       -m    (default off) Completely turn off audio.\n\n");
 					return 0;
-		} else if(strcmp(argv[i], "-z") == 0 && i < argc+2) {
-			i++;
-			scale=atoi(argv[i]);
-			if(scale==0) {
-				printf("Scale must be an integer larger than 0.\n");
-				return(1);
+		} else if(strcmp(argv[i], "-z") == 0) {
+			if(i+1 < argc) {
+				i++;
+				scale=atoi(argv[i]);
+				if(scale==0) {
+					printf("Scale must be an integer larger than 0.\n");
+					return 1;
+				}
+				printf("Scaling %i.\n", scale);
+			} else {
+				printf("Missing the scale number, see -h");
+				return 1;
 			}
-			printf("Scaling %i.\n", scale);
 		} else if(strcmp(argv[i], "-f")==0) {
 			fullscreenFlag = SDL_WINDOW_FULLSCREEN_DESKTOP;
-			printf("Fullscreen on.\n");
+			printf("Fullscreen is on.\n");
 		}  else if(strcmp(argv[i], "-s")==0) {
 			renderFlag = SDL_RENDERER_SOFTWARE;
 		}  else if(strcmp(argv[i], "-v")==0) {
 			vsyncFlag = SDL_RENDERER_PRESENTVSYNC;
-			printf("Vsync on.\n");
+			printf("Vsync is on.\n");
 		} else if(strcmp(argv[i], "-c")==0) {
 			fast=0;
 		} else if(strcmp(argv[i], "-m")==0) {
 			audioFlag=0;
-			printf("Mute audio.\n");
+			printf("Audio is off.\n");
 		} else {
 			printf("Unknown option '%s', try -h\n", argv[i]);
 			return 1;
@@ -124,7 +130,6 @@ int main(int argc, char** argv) {
 	// Build a table with colors for two pixels packed into a byte.
 	// Then if we treat the framebuffer as an uint64 array we get to write two pixels in by doing one read and one write.
 	u_int64_t pixMap[0x100];
-
 	for(int i=0; i<0x100; i++) {
 		int ph = (i & 0xf0) >> 4;
 		int pl = i & 0x0f;
@@ -192,11 +197,15 @@ int main(int argc, char** argv) {
 
 
 	// Create a window
-	SDL_Window *win = SDL_CreateWindow("Ultimate 64 view!", 100, 100, width*scale, height*scale, SDL_WINDOW_SHOWN | fullscreenFlag);
+	SDL_Window *win = SDL_CreateWindow("Ultimate 64 view!", 100, 100, width*scale, height*scale, SDL_WINDOW_SHOWN | fullscreenFlag | SDL_WINDOW_RESIZABLE);
 	if (win == NULL) {
 		printf("SDL_CreateWindow Error: %s\n", SDL_GetError());
 		return 10;
 	}
+	// Set icon
+	SDL_Surface *iconSurface = SDL_CreateRGBSurfaceFrom(iconPixels,32,32,32,32*4, 0x000000ff, 0x0000ff00, 0x00ff0000, 0xff000000);
+	SDL_SetWindowIcon(win, iconSurface);
+	SDL_FreeSurface(iconSurface);
 
 	// Create a renderer
 	SDL_Renderer *ren = SDL_CreateRenderer(win, -1, (vsyncFlag | renderFlag));
