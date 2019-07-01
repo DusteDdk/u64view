@@ -32,9 +32,15 @@ char* intToIp(uint32_t ip) {
 }
 
 // I found the colors here: https://gist.github.com/funkatron/758033
-const uint64_t  red[]   = {0 , 255, 0x68, 0x70, 0x6f, 0x58, 0x35, 0xb8, 0x6f, 0x43, 0x9a, 0x44, 0x6c, 0x9a, 0x6c, 0x95 };
-const uint64_t  green[] = {0 , 255, 0x37, 0xa4, 0x3d, 0x8d, 0x28, 0xc7, 0x4f, 0x39, 0x67, 0x44, 0x6c, 0xd2, 0x5e, 0x95 };
-const uint64_t  blue[]  = {0 , 255, 0x2b, 0xb2, 0x86, 0x43, 0x79, 0x6f, 0x25, 0x00, 0x59, 0x44, 0x6c, 0x84, 0xb5, 0x95 };
+const uint64_t  sred[]   = {0 , 255, 0x68, 0x70, 0x6f, 0x58, 0x35, 0xb8, 0x6f, 0x43, 0x9a, 0x44, 0x6c, 0x9a, 0x6c, 0x95 };
+const uint64_t  sgreen[] = {0 , 255, 0x37, 0xa4, 0x3d, 0x8d, 0x28, 0xc7, 0x4f, 0x39, 0x67, 0x44, 0x6c, 0xd2, 0x5e, 0x95 };
+const uint64_t  sblue[]  = {0 , 255, 0x2b, 0xb2, 0x86, 0x43, 0x79, 0x6f, 0x25, 0x00, 0x59, 0x44, 0x6c, 0x84, 0xb5, 0x95 };
+
+// I found these colors by showing them on my CRT monitor and taking a picture with my dslr, doing white correction on the raw and averaging the pixels
+// They're not mean to be faithful, just thought it'd be kinda fun to see
+const uint64_t dred[]   = { 0x06, 0xf2, 0xb6, 0xa2, 0xaf, 0x86, 0x00, 0xf8, 0xd0, 0x79, 0xfb, 0x5e, 0xa3, 0xd1, 0x6e, 0xdc };
+const uint64_t dgreen[] = { 0x0a, 0xf1, 0x3c, 0xf7, 0x45, 0xf9, 0x3a, 0xfe, 0x6e, 0x4e, 0x91, 0x6e, 0xb6, 0xfc, 0xb3, 0xe2 };
+const uint64_t dblue[]  = { 0x0b, 0xf1, 0x47, 0xed, 0xd7, 0x64, 0xf2, 0x8a, 0x28, 0x00, 0x8f, 0x69, 0xad, 0xc5, 0xff, 0xdb };
 
 void pic(SDL_Texture* tex, int width, int height, int pitch, uint32_t* pixels) {
 	union {
@@ -83,17 +89,20 @@ int main(int argc, char** argv) {
 	int fast=1;
 	int audioFlag=SDL_INIT_AUDIO;
 
+	const u_int64_t *red = sred, *green =sgreen, *blue=sblue;;
+
 	printf("\nUltimate 64 view!\n-----------------\n  Try -h for options.\n\n");
 
 	for(int i=1; i < argc; i++) {
 		if(strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-			printf("\nUsage: u64view [-z N |-f] [-s] [-v] [-c] [-m]\n"
+			printf("\nUsage: u64view [-z N |-f] [-s] [-v] [-c] [-m] [-t]\n"
 					"       -z N  (default 1)   Scale the window to N times size, N must be an integer.\n"
 					"       -f    (default off) Fullscreen, will stretch.\n"
 					"       -s    (default off) Prefer software rendering, more cpu intensive.\n"
 					"       -v    (default off) Use vsync.\n"
 					"       -c    (default off) Use more versatile drawing method, more cpu intensive, can't scale.\n"
-					"       -m    (default off) Completely turn off audio.\n\n");
+					"       -m    (default off) Completely turn off audio.\n"
+					"       -t    (default off) Use colors that look more like DusteDs TV instead of the 'real' colors...\n\n");
 					return 0;
 		} else if(strcmp(argv[i], "-z") == 0) {
 			if(i+1 < argc) {
@@ -121,6 +130,11 @@ int main(int argc, char** argv) {
 		} else if(strcmp(argv[i], "-m")==0) {
 			audioFlag=0;
 			printf("Audio is off.\n");
+		} else if(strcmp(argv[i], "-t")==0) {
+			red=dred;
+			green=dgreen;
+			blue=dblue;
+			printf("Using DusteDs CRT colors.\n");
 		} else {
 			printf("Unknown option '%s', try -h\n", argv[i]);
 			return 1;
@@ -134,6 +148,8 @@ int main(int argc, char** argv) {
 		int ph = (i & 0xf0) >> 4;
 		int pl = i & 0x0f;
 		pixMap[i] = red[ph] << (64-8) | green[ph]<< (64-16) | blue[ph] << (64-24) | (uint64_t)0xff << (64-32) | red[pl] << (32-8) | green[pl] << (32-16) | blue[pl] << (32-24) | 0xff;
+
+
 	}
 
 	pkg = SDLNet_AllocPacket(sizeof(u64msg_t));
