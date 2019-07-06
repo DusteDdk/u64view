@@ -88,6 +88,8 @@ int main(int argc, char** argv) {
 	int vsyncFlag = 0;
 	int fast=1;
 	int audioFlag=SDL_INIT_AUDIO;
+	FILE *vfp=NULL, *afp=NULL;
+	char fnbuf[4096];
 
 	const uint64_t *red = sred, *green =sgreen, *blue=sblue;;
 
@@ -95,14 +97,15 @@ int main(int argc, char** argv) {
 
 	for(int i=1; i < argc; i++) {
 		if(strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-			printf("\nUsage: u64view [-z N |-f] [-s] [-v] [-c] [-m] [-t]\n"
+			printf("\nUsage: u64view [-z N |-f] [-s] [-v] [-c] [-m] [-t] [-o FN]\n"
 					"       -z N  (default 1)   Scale the window to N times size, N must be an integer.\n"
 					"       -f    (default off) Fullscreen, will stretch.\n"
 					"       -s    (default off) Prefer software rendering, more cpu intensive.\n"
 					"       -v    (default off) Use vsync.\n"
 					"       -c    (default off) Use more versatile drawing method, more cpu intensive, can't scale.\n"
 					"       -m    (default off) Completely turn off audio.\n"
-					"       -t    (default off) Use colors that look more like DusteDs TV instead of the 'real' colors...\n\n");
+					"       -t    (default off) Use colors that look more like DusteDs TV instead of the 'real' colors...\n"
+					"       -o FN (default off) Output raw ARGB to FN.rgb and PCM to FN.pcm (takes some gigabytes).\n\n");
 					return 0;
 		} else if(strcmp(argv[i], "-z") == 0) {
 			if(i+1 < argc) {
@@ -135,6 +138,28 @@ int main(int argc, char** argv) {
 			green=dgreen;
 			blue=dblue;
 			printf("Using DusteDs CRT colors.\n");
+		} else if(strcmp(argv[i], "-o") == 0) {
+			if(i+1 < argc) {
+				i++;
+				printf("Outputting video to %s.rgb and audio to %s.pcm ...\n", argv[i], argv[i]);
+				printf("Try encoding with: ffmpeg -vcodec rawvideo -pix_fmt abgr -s 384x272 -r 50 -i %s.rgb -f s16le -ar 47983 -ac 2 -i %s.pcm -vf scale=w=1920:h=1080:force_original_aspect_ratio=decrease -sws_flags neighbor  -crf 15 -vcodec libx264 %s.avi", argv[i],argv[i],argv[i]);
+
+				sprintf(fnbuf, "%s.rgb", argv[i]);
+				vfp=fopen(fnbuf,"w");
+				if(!vfp) {
+					printf("Error opening %s for writing.\n", fnbuf);
+					return 1;
+				}
+				sprintf(fnbuf, "%s.pcm", argv[i]);
+				afp=fopen(fnbuf,"w");
+				if(!afp) {
+					printf("Error opening %s for writing.\n", fnbuf);
+					return 1;
+				}
+			} else {
+				printf("Missing filename.\n");
+				return 1;
+			}
 		} else {
 			printf("Unknown option '%s', try -h\n", argv[i]);
 			return 1;
@@ -271,6 +296,10 @@ int main(int argc, char** argv) {
 				}
 
 				a64msg_t *a = (a64msg_t*)audpkg->data;
+				if(afp && sawaudio && sawvideo) {
+					fwrite(a->sample, 192*4, 1, afp);
+				}
+
 				SDL_QueueAudio(dev, a->sample, 192*4 );
 			} else if(r == -1) {
 				printf("SDLNet_UDP_Recv error: %s\n", SDLNet_GetError());
@@ -336,6 +365,9 @@ int main(int argc, char** argv) {
 		if(sync) {
 			sync=0;
 			if(fast) {
+				if(vfp && sawaudio && sawvideo) {
+					fwrite(pixels, sizeof(uint32_t)*width*height, 1, vfp);
+				}
 				SDL_UnlockTexture(tex);
 				SDL_RenderCopy(ren, tex, NULL, NULL);
 				SDL_RenderPresent(ren);
@@ -352,6 +384,12 @@ int main(int argc, char** argv) {
 	SDL_DestroyTexture(tex);
 	if(audioFlag) {
 		SDL_CloseAudioDevice(dev);
+	}
+
+	// The logic being that if opening either went south, we already exited.
+	if(vfp) {
+		fclose(vfp);
+		fclose(afp);
 	}
 	SDL_DestroyRenderer(ren);
 	SDL_DestroyWindow(win);
