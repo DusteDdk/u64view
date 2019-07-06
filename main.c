@@ -77,9 +77,9 @@ int main(int argc, char** argv) {
 	int pitch=0;
 
 	SDL_AudioSpec want, have;
-	SDL_AudioDeviceID dev;
+	SDL_AudioDeviceID dev=0;
 	UDPpacket *pkg, *audpkg;
-	UDPsocket udpsock,audiosock;
+	UDPsocket udpsock=NULL, audiosock=NULL;
 	SDLNet_SocketSet set;
 
 	int scale=1;
