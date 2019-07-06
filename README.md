@@ -29,6 +29,10 @@ To execute
 ==========
 ./u64view
 
+
+For windows users:
+Go into the windows directory and run u64view.exe
+
 For help
 ========
 ./u64view -h
