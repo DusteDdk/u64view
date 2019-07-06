@@ -21,7 +21,7 @@ typedef struct __attribute__((__packed__)) {
 } u64msg_t;
 
 typedef struct __attribute__((__packed__)) {
-	u_int16_t seq;
+	uint16_t seq;
 	int16_t sample[192*4];
 } a64msg_t;
 
@@ -89,7 +89,7 @@ int main(int argc, char** argv) {
 	int fast=1;
 	int audioFlag=SDL_INIT_AUDIO;
 
-	const u_int64_t *red = sred, *green =sgreen, *blue=sblue;;
+	const uint64_t *red = sred, *green =sgreen, *blue=sblue;;
 
 	printf("\nUltimate 64 view!\n-----------------\n  Try -h for options.\n\n");
 
@@ -143,7 +143,7 @@ int main(int argc, char** argv) {
 
 	// Build a table with colors for two pixels packed into a byte.
 	// Then if we treat the framebuffer as an uint64 array we get to write two pixels in by doing one read and one write.
-	u_int64_t pixMap[0x100];
+	uint64_t pixMap[0x100];
 	for(int i=0; i<0x100; i++) {
 		int ph = (i & 0xf0) >> 4;
 		int pl = i & 0x0f;

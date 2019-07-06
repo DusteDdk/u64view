@@ -1,0 +1,1 @@
+i686-w64-mingw32-gcc-win32 -Wall -std=c99 -O2 -I /src/libs/SDL2-2.0.9/i686-w64-mingw32/include/ -I /src/libs/SDL2-2.0.9/i686-w64-mingw32/include/SDL2/ -I /src/libs/SDL2_net-2.0.1/i686-w64-mingw32/include/ *.c -ou64view.exe -L /src/libs/SDL2-2.0.9/i686-w64-mingw32/lib/ -L /src/libs/SDL2_net-2.0.1/i686-w64-mingw32/lib/ -lmingw32 -lSDL2main -lSDL2 -lSDL2_net
