@@ -267,7 +267,7 @@ int main(int argc, char** argv) {
 			if(r==1) {
 				if(!sawaudio) {
 					sawaudio=1;
-					printf("Got data on audio port (%i) from %s:%i\n", listenaudio, intToIp(pkg->address.host),pkg->address.port );
+					printf("Got data on audio port (%i) from %s:%i\n", listenaudio, intToIp(audpkg->address.host),audpkg->address.port );
 				}
 
 				a64msg_t *a = (a64msg_t*)audpkg->data;
