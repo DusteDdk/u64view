@@ -29,20 +29,18 @@ To execute
 ==========
 ./u64view
 
-
-For windows users:
-Go into the windows directory and run u64view.exe
-
-For help
-========
+For help / show parameters
+==========================
 ./u64view -h
 
 License
 =======
 wtfpl
 
-Windows ? Mac OSX ?
+Mac OSX ?
 ===================
-I've been told that this builds and works fine on OSX, I don't know about windows, but I expect it works fine if you compile it.
+I've been told that this builds and works fine on OSX, I don't have a mac, so you need to compile it yourself.
 
+Alternatives?
+=============
 For Windows users there is also another Ultimate 64 viewer, called "U64 Streamer" made by Martijn Wieland (TSB), check it out at https://www.tsb.space/projects/u64-streamer/
