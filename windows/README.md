@@ -8,8 +8,6 @@ It listens for video on port 11000.
 
 It listens for audio on port 11001.
 
-![shot of the screen](https://github.com/DusteDdk/u64view/blob/master/screenIsHot.jpeg)
-
 Official website: https://github.com/dusteddk/u64view/
 
 WHAT
@@ -29,11 +27,12 @@ make
 
 To execute
 ==========
-./u64view
+Run u64view.exe
 
 For help / show parameters
 ==========================
-./u64view -h
+Use cmd, navigate to directory and type
+u64view.exe -h
 
 License
 =======
