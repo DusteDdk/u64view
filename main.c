@@ -71,6 +71,94 @@ void pic(SDL_Texture* tex, int width, int height, int pitch, uint32_t* pixels) {
 	}
 }
 
+void sendSequence(char *hostName, const uint8_t *data, int len) {
+	IPaddress ip;
+	TCPsocket sock;
+	uint8_t buf[1024];
+	SDLNet_SocketSet set;
+	set=SDLNet_AllocSocketSet(1);
+	int result =0;
+
+	if(SDLNet_ResolveHost(&ip, hostName, 23)) {
+		printf("Error resolving '%s' : %s\n", hostName, SDLNet_GetError());
+		return;
+	}
+
+	sock = SDLNet_TCP_Open(&ip);
+	if(!sock) {
+		printf("Error connecting to '%s' : %s\n", hostName, SDLNet_GetError());
+		return;
+	}
+
+	SDLNet_TCP_AddSocket(set, sock);
+
+	SDL_Delay(100);
+	for(int i=0; i < len; i++) {
+		SDL_Delay(30);
+		if(SDLNet_TCP_Send(sock, &data[i], 1) <1 ) {
+			printf("Error sending command data: %s\n", SDLNet_GetError());
+		}
+		// Empty u64 send buffer
+		while( SDLNet_CheckSockets(set, 30) == 1 ) {
+			result = SDLNet_TCP_Recv(sock, &buf, 1023);
+			buf[result]=0;
+			//puts(buf); // debug, messes up terminal.
+		}
+	}
+
+	SDLNet_TCP_Close(sock);
+}
+
+// Yeye, these are fragile, they're good enough for now.
+void startStream(char *hostName) {
+	const uint8_t data[] = {
+		0x1b, 0x5b, 0x31, 0x35, 0x7e, // f5
+		0x1b, 0x5b, 0x42, // Arrow down
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0xd, 0x00, //enter
+		0xd, 0x00,
+		0x1b, 0x5b, 0x31, 0x35, 0x7e, // f5
+		0x1b, 0x5b, 0x42, // arrow down
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0xd, 0x00, //enter
+		0xd, 0x00
+	};
+	printf("Sending start stream sequence to Ultimate64...");
+	sendSequence(hostName, data, sizeof(data));
+	printf(" done.\n");
+}
+
+void stopStream(char* hostName) {
+	const uint8_t data[] = {
+		0x1b, 0x5b, 0x31, 0x35, 0x7e, // f5
+		0x1b, 0x5b, 0x42, // Arrow down
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0xd, 0x00, //enter
+		0x1b, 0x5b, 0x31, 0x35, 0x7e, // f5
+		0x1b, 0x5b, 0x42, // arrow down
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0xd, 0x00, //enter
+	};
+	printf("Sending stop stream sequence to Ultimate64...");
+	sendSequence(hostName, data, sizeof(data));
+	printf(" done.\n");
+}
+
+
 int main(int argc, char** argv) {
 
 	SDL_Event event;
@@ -98,7 +186,7 @@ int main(int argc, char** argv) {
 	int fast=1;
 	int audioFlag=SDL_INIT_AUDIO;
 	FILE *vfp=NULL, *afp=NULL;
-	char fnbuf[4096];
+	char fnbuf[4096], *hostName=NULL;
 	uint16_t lastAseq=0, lastVseq=0;
 
 	const uint64_t *red = sred, *green =sgreen, *blue=sblue;;
@@ -107,7 +195,7 @@ int main(int argc, char** argv) {
 
 	for(int i=1; i < argc; i++) {
 		if(strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-			printf("\nUsage: u64view [-z N |-f] [-s] [-v] [-V] [-c] [-m] [-t] [-o FN]\n"
+			printf("\nUsage: u64view [-z N |-f] [-s] [-v] [-V] [-c] [-m] [-t] [-u IP] [-o FN]\n"
 					"       -z N  (default 1)   Scale the window to N times size, N must be an integer.\n"
 					"       -f    (default off) Fullscreen, will stretch.\n"
 					"       -s    (default off) Prefer software rendering, more cpu intensive.\n"
@@ -115,7 +203,8 @@ int main(int argc, char** argv) {
 					"       -V    (default off) Verbose output, tell when packets are dropped, how much data was transferred.\n"
 					"       -c    (default off) Use more versatile drawing method, more cpu intensive, can't scale.\n"
 					"       -m    (default off) Completely turn off audio.\n"
-					"       -t    (default off) Use colors that look more like DusteDs TV instead of the 'real' colors...\n"
+					"       -t    (default off) Use colors that look more like DusteDs TV instead of the 'real' colors.\n"
+					"       -u IP (default off) Connect to Ultimate64 at IP and command it to start streaming Video and Audio.\n"
 					"       -o FN (default off) Output raw ARGB to FN.rgb and PCM to FN.pcm (20 MiB/s, you disk must keep up or packets are dropped).\n\n");
 					return 0;
 		} else if(strcmp(argv[i], "-z") == 0) {
@@ -180,6 +269,14 @@ int main(int argc, char** argv) {
 				printf("Missing filename.\n");
 				return 1;
 			}
+		} else if(strcmp(argv[i], "-u") == 0) {
+			if(i+1 < argc) {
+				i++;
+				hostName=argv[i];
+			} else {
+				printf("Missing IP address.\n");
+				return 1;
+			}
 		} else {
 			printf("Unknown option '%s', try -h\n", argv[i]);
 			return 1;
@@ -209,6 +306,10 @@ int main(int argc, char** argv) {
 	if(SDLNet_Init()==-1) {
 		printf("SDLNet_Init: %s\n", SDLNet_GetError());
 		return 2;
+	}
+
+	if(hostName) {
+		startStream(hostName);
 	}
 
 	set=SDLNet_AllocSocketSet(2);
@@ -406,6 +507,10 @@ int main(int argc, char** argv) {
 			}
 		}
 		SDLNet_CheckSockets(set, 200);
+	}
+
+	if(hostName) {
+		stopStream(hostName);
 	}
 
 	SDL_DestroyTexture(tex);
