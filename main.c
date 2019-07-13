@@ -45,6 +45,10 @@ const uint64_t dred[]   = { 0x06, 0xf2, 0xb6, 0xa2, 0xaf, 0x86, 0x00, 0xf8, 0xd0
 const uint64_t dgreen[] = { 0x0a, 0xf1, 0x3c, 0xf7, 0x45, 0xf9, 0x3a, 0xfe, 0x6e, 0x4e, 0x91, 0x6e, 0xb6, 0xfc, 0xb3, 0xe2 };
 const uint64_t dblue[]  = { 0x0b, 0xf1, 0x47, 0xed, 0xd7, 0x64, 0xf2, 0x8a, 0x28, 0x00, 0x8f, 0x69, 0xad, 0xc5, 0xff, 0xdb };
 
+uint64_t ured[] = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
+uint64_t ugreen[] = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
+uint64_t ublue[] = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
+
 int verbose=0;
 void chkSeq(const char* msg, uint16_t *lseq, uint16_t cseq) {
 	if((uint16_t)(*lseq+1) != cseq && (totalAdataBytes>1024*10 && totalVdataBytes > 1024*1024) ) {
@@ -92,9 +96,9 @@ void sendSequence(char *hostName, const uint8_t *data, int len) {
 
 	SDLNet_TCP_AddSocket(set, sock);
 
-	SDL_Delay(100);
+	SDL_Delay(10);
 	for(int i=0; i < len; i++) {
-		SDL_Delay(30);
+		SDL_Delay(1);
 		if(SDLNet_TCP_Send(sock, &data[i], 1) <1 ) {
 			printf("Error sending command data: %s\n", SDLNet_GetError());
 		}
@@ -129,9 +133,9 @@ void startStream(char *hostName) {
 		0xd, 0x00, //enter
 		0xd, 0x00
 	};
-	printf("Sending start stream sequence to Ultimate64...");
+	printf("Sending start stream sequence to Ultimate64...\n");
 	sendSequence(hostName, data, sizeof(data));
-	printf(" done.\n");
+	printf("  * done.\n");
 }
 
 void stopStream(char* hostName) {
@@ -153,11 +157,17 @@ void stopStream(char* hostName) {
 		0x1b, 0x5b, 0x42,
 		0xd, 0x00, //enter
 	};
-	printf("Sending stop stream sequence to Ultimate64...");
+	printf("Sending stop stream sequence to Ultimate64...\n");
 	sendSequence(hostName, data, sizeof(data));
-	printf(" done.\n");
+	printf("  * done.\n");
 }
 
+void printColors(const uint64_t *red, const uint64_t *green, const uint64_t *blue) {
+	for(int i=0; i < 16; i++) {
+		printf("%02x%02x%02x%c", (int)red[i], (int)green[i],(int)blue[i], ((i==15)?' ':',') );
+	}
+
+}
 
 int main(int argc, char** argv) {
 
@@ -188,6 +198,7 @@ int main(int argc, char** argv) {
 	FILE *vfp=NULL, *afp=NULL;
 	char fnbuf[4096], *hostName=NULL;
 	uint16_t lastAseq=0, lastVseq=0;
+	int stopStreamOnExit=1;
 
 	const uint64_t *red = sred, *green =sgreen, *blue=sblue;;
 
@@ -195,7 +206,7 @@ int main(int argc, char** argv) {
 
 	for(int i=1; i < argc; i++) {
 		if(strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-			printf("\nUsage: u64view [-z N |-f] [-s] [-v] [-V] [-c] [-m] [-t] [-u IP] [-o FN]\n"
+			printf("\nUsage: u64view [-z N |-f] [-s] [-v] [-V] [-c] [-m] [-t] [-T [RGB,...]] [-u IP] [-o FN]\n"
 					"       -z N  (default 1)   Scale the window to N times size, N must be an integer.\n"
 					"       -f    (default off) Fullscreen, will stretch.\n"
 					"       -s    (default off) Prefer software rendering, more cpu intensive.\n"
@@ -204,7 +215,9 @@ int main(int argc, char** argv) {
 					"       -c    (default off) Use more versatile drawing method, more cpu intensive, can't scale.\n"
 					"       -m    (default off) Completely turn off audio.\n"
 					"       -t    (default off) Use colors that look more like DusteDs TV instead of the 'real' colors.\n"
+					"       -T [] (default off) No argument: Show color values and help for -T\n"
 					"       -u IP (default off) Connect to Ultimate64 at IP and command it to start streaming Video and Audio.\n"
+					"       -U IP (default off) Same as -u but don't stop the streaming when u64view exits.\n"
 					"       -o FN (default off) Output raw ARGB to FN.rgb and PCM to FN.pcm (20 MiB/s, you disk must keep up or packets are dropped).\n\n");
 					return 0;
 		} else if(strcmp(argv[i], "-z") == 0) {
@@ -241,6 +254,55 @@ int main(int argc, char** argv) {
 			green=dgreen;
 			blue=dblue;
 			printf("Using DusteDs CRT colors.\n");
+		} else if(strcmp(argv[i], "-T") == 0) {
+			if(i+1 >= argc || argv[i+1][0] == '-') {
+				printf("User-defined color option (-T):\n\n    Default colors: ");
+				printColors(sred, sgreen, sblue);
+				printf("\n    DusteDs colors: ");
+				printColors(dred, dgreen, dblue);
+				printf("\n\n    If you want to use your own color values, just type them after -T in the format shown above (RGB24 in hex, like HTML, and comma between each color).\n"
+						"    The colors are, in order: black, white, red, cyan, purple, green, blue, yellow, orange, brown, pink, dark-grey, grey, light-green, light-blue, light-grey.\n"
+						"    Example: DusteDs colors, with a slightly darker blue: -T 060a0b,f2f1f1,b63c47,a2f7ed,af45d7,86f964,0030Ef,f8fe8a,d06e28,794e00,fb918f,5e6e69,a3b6ad,d1fcc5,6eb3ff,dce2db\n\n\n");
+				return 0;
+			} else {
+				i++;
+				char* ucol = argv[i];
+				printf("Using user-provided colors: ");
+				const int ucbytes = 16*6 + 15; // 16 6 byte values + the 15 commas between them
+				if(strlen(ucol) != ucbytes)
+				{
+					printf("Error: Expected a string of exactly %i characters (see  -T without parameter to see examples)\n", ucbytes);
+				}
+				int pos=0;
+				char colbyte[3] = {0,0,0 };
+				for(int i=0; i < 16; i++) {
+					colbyte[0] = ucol[pos];
+					pos++;
+					colbyte[1] = ucol[pos];
+					pos++;
+					ured[i] = strtol(colbyte, NULL, 16);
+
+					colbyte[0] = ucol[pos];
+					pos++;
+					colbyte[1] = ucol[pos];
+					pos++;
+					ugreen[i] = strtol(colbyte, NULL, 16);
+
+					colbyte[0] = ucol[pos];
+					pos++;
+					colbyte[1] = ucol[pos];
+					pos++;
+					ublue[i] = strtol(colbyte, NULL, 16);
+
+					pos++; // Skip character after 6 bytes
+				}
+				red=ured;
+				green=ugreen;
+				blue=ublue;
+
+				printColors(ured, ugreen, ublue);
+				printf("\n");
+			}
 		} else if(strcmp(argv[i], "-o") == 0) {
 			if(i+1 < argc) {
 				i++;
@@ -269,7 +331,10 @@ int main(int argc, char** argv) {
 				printf("Missing filename.\n");
 				return 1;
 			}
-		} else if(strcmp(argv[i], "-u") == 0) {
+		} else if(strcmp(argv[i], "-u") == 0 || strcmp(argv[i], "-U") == 0) {
+			if(strcmp(argv[i], "-U") == 0) {
+				stopStreamOnExit=0;
+			}
 			if(i+1 < argc) {
 				i++;
 				hostName=argv[i];
@@ -509,7 +574,7 @@ int main(int argc, char** argv) {
 		SDLNet_CheckSockets(set, 200);
 	}
 
-	if(hostName) {
+	if(hostName && stopStreamOnExit) {
 		stopStream(hostName);
 	}
 
