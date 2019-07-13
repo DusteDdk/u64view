@@ -45,9 +45,44 @@ const uint64_t dred[]   = { 0x06, 0xf2, 0xb6, 0xa2, 0xaf, 0x86, 0x00, 0xf8, 0xd0
 const uint64_t dgreen[] = { 0x0a, 0xf1, 0x3c, 0xf7, 0x45, 0xf9, 0x3a, 0xfe, 0x6e, 0x4e, 0x91, 0x6e, 0xb6, 0xfc, 0xb3, 0xe2 };
 const uint64_t dblue[]  = { 0x0b, 0xf1, 0x47, 0xed, 0xd7, 0x64, 0xf2, 0x8a, 0x28, 0x00, 0x8f, 0x69, 0xad, 0xc5, 0xff, 0xdb };
 
-uint64_t ured[] = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
-uint64_t ugreen[] = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
-uint64_t ublue[] = { 0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0 };
+uint64_t ured[] =   { 10,255,30,40,50,60,70,80,90,0xa0,0xb0,0xc0,0xd0,0xc0,0xd0,0xe0 };
+uint64_t ugreen[] = { 10,255,30,40,50,60,70,80,90,0xa0,0xb0,0xc0,0xd0,0xc0,0xd0,0xe0 };
+uint64_t ublue[] =  { 10,255,30,40,50,60,70,80,90,0xa0,0xb0,0xc0,0xd0,0xc0,0xd0,0xe0 };
+
+int curColors=0;
+const uint64_t *red = sred, *green =sgreen, *blue=sblue;;
+uint64_t pixMap[0x100];
+
+void setColors(int colors) {
+
+	switch(colors) {
+		case 0:
+			red = sred;
+			green = sgreen;
+			blue = sblue;
+			break;
+		case 1:
+			red = dred;
+			green = dgreen;
+			blue = dblue;
+			break;
+		case 2:
+			red = ured;
+			green = ugreen;
+			blue = ublue;
+			break;
+	}
+
+	// Build a table with colors for two pixels packed into a byte.
+	// Then if we treat the framebuffer as an uint64 array we get to write two pixels in by doing one read and one write
+	for(int i=0; i<0x100; i++) {
+		int ph = (i & 0xf0) >> 4;
+		int pl = i & 0x0f;
+		pixMap[i] = red[ph] << (64-8) | green[ph]<< (64-16) | blue[ph] << (64-24) | (uint64_t)0xff << (64-32) | red[pl] << (32-8) | green[pl] << (32-16) | blue[pl] << (32-24) | 0xff;
+
+
+	}
+}
 
 int verbose=0;
 void chkSeq(const char* msg, uint16_t *lseq, uint16_t cseq) {
@@ -112,7 +147,7 @@ void sendSequence(char *hostName, const uint8_t *data, int len) {
 
 	SDLNet_TCP_Close(sock);
 }
-
+int isStreaming=0;
 // Yeye, these are fragile, they're good enough for now.
 void startStream(char *hostName) {
 	const uint8_t data[] = {
@@ -136,6 +171,7 @@ void startStream(char *hostName) {
 	printf("Sending start stream sequence to Ultimate64...\n");
 	sendSequence(hostName, data, sizeof(data));
 	printf("  * done.\n");
+	isStreaming=1;
 }
 
 void stopStream(char* hostName) {
@@ -160,7 +196,31 @@ void stopStream(char* hostName) {
 	printf("Sending stop stream sequence to Ultimate64...\n");
 	sendSequence(hostName, data, sizeof(data));
 	printf("  * done.\n");
+	isStreaming=0;
 }
+
+
+void powerOff(char* hostName) {
+	const uint8_t data[] = {
+		0x1b, 0x5b, 0x31, 0x35, 0x7e, // f5
+		0x1b, 0x5b, 0x42, // Arrow down
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0xd, 0x00, //enter
+	};
+	printf("Sending power-off sequence to Ultimate64...\n");
+	sendSequence(hostName, data, sizeof(data));
+	printf("  * done.\n");
+	isStreaming=0;
+}
+
 
 void printColors(const uint64_t *red, const uint64_t *green, const uint64_t *blue) {
 	for(int i=0; i < 16; i++) {
@@ -198,9 +258,8 @@ int main(int argc, char** argv) {
 	FILE *vfp=NULL, *afp=NULL;
 	char fnbuf[4096], *hostName=NULL;
 	uint16_t lastAseq=0, lastVseq=0;
-	int stopStreamOnExit=1;
+	int stopStreamOnExit=1, showHelp=0;
 
-	const uint64_t *red = sred, *green =sgreen, *blue=sblue;;
 
 	printf("\nUltimate 64 view!\n-----------------\n  Try -h for options.\n\n");
 
@@ -250,9 +309,7 @@ int main(int argc, char** argv) {
 			audioFlag=0;
 			printf("Audio is off.\n");
 		} else if(strcmp(argv[i], "-t")==0) {
-			red=dred;
-			green=dgreen;
-			blue=dblue;
+			curColors = 1;
 			printf("Using DusteDs CRT colors.\n");
 		} else if(strcmp(argv[i], "-T") == 0) {
 			if(i+1 >= argc || argv[i+1][0] == '-') {
@@ -296,10 +353,8 @@ int main(int argc, char** argv) {
 
 					pos++; // Skip character after 6 bytes
 				}
-				red=ured;
-				green=ugreen;
-				blue=ublue;
 
+				curColors = 2;
 				printColors(ured, ugreen, ublue);
 				printf("\n");
 			}
@@ -348,16 +403,8 @@ int main(int argc, char** argv) {
 		}
 	}
 
-	// Build a table with colors for two pixels packed into a byte.
-	// Then if we treat the framebuffer as an uint64 array we get to write two pixels in by doing one read and one write.
-	uint64_t pixMap[0x100];
-	for(int i=0; i<0x100; i++) {
-		int ph = (i & 0xf0) >> 4;
-		int pl = i & 0x0f;
-		pixMap[i] = red[ph] << (64-8) | green[ph]<< (64-16) | blue[ph] << (64-24) | (uint64_t)0xff << (64-32) | red[pl] << (32-8) | green[pl] << (32-16) | blue[pl] << (32-24) | 0xff;
 
-
-	}
+	setColors(curColors);
 
 	pkg = SDLNet_AllocPacket(sizeof(u64msg_t));
 	audpkg = SDLNet_AllocPacket(sizeof(a64msg_t));
@@ -464,6 +511,34 @@ int main(int argc, char** argv) {
 				case SDLK_ESCAPE:
 					run = 0;
 				break;
+				case SDLK_c:
+					showHelp=0;
+					curColors++;
+					if(curColors==3) {
+						curColors=0;
+					}
+					setColors(curColors);
+				break;
+				case SDLK_s:
+					showHelp=0;
+					if(!hostName) {
+						printf("Can only start/stop stream when started with -u or -U.\n");
+					} else {
+						if(isStreaming) {
+							stopStream(hostName);
+						} else {
+							startStream(hostName);
+						}
+					}
+				break;
+				case SDLK_h:
+					showHelp=!showHelp;
+				break;
+				case SDLK_p:
+					stopStreamOnExit=0;
+					powerOff(hostName);
+					hostName=0;
+				break;
 			}
 			break;
 			case SDL_QUIT:
@@ -497,7 +572,7 @@ int main(int argc, char** argv) {
 
 		// Check for video
 		r = SDLNet_UDP_Recv(udpsock, pkg);
-		if(r==1) {
+		if(r==1 && !showHelp) {
 
 			if(totalVdataBytes==0) {
 				printf("Got data on video port (%i) from %s:%i\n", listen, intToIp(pkg->address.host),pkg->address.port );
