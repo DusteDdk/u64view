@@ -15,7 +15,7 @@ mkdir -p $win/docs
 cp windows/*.txt $win/docs/
 cp LICENSE $win/docs/
 cp windows/README.md  $win/
-cp windows/*.dll $win/
+# cp windows/*.dll $win/
 cp windows/*.exe $win/
 
 zip -r -9 $win.zip $win
