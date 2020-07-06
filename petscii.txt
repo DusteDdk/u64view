@@ -1,0 +1,76 @@
+http://www.zimmers.net/cbmpics/cbm/c64/c64prg.txt
+
+  APPENDIX C
+
+  ASCII AND CHR$ CODES
+
+    This appendix shows you what characters will appear if you PRINT
+  CHR$(X), for all possible values of X. It will also show the values ob-
+  tained by typing PRINT ASC("x"), where x is any character you can type.
+  This is useful in evaluating the character received in a GET statement,
+  converting upper/lower case, and printing character based commands (like
+  switch to upper/lower case) that could not be enclosed in quotes.
+
+
+  +-----------------+-----------------+-----------------+-----------------+
+  |  PRINTS   CHR$  |  PRINTS   CHR$  |  PRINTS   CHR$  |  PRINTS   CHR$  |
+  +-----------------+-----------------+-----------------+-----------------+
+  |             0   |  {down}    17   |    "       34   |    3       51   |
+  |             1   | {rvs on}   18   |    #       35   |    4       52   |
+  |             2   |  {home}    19   |    $       36   |    5       53   |
+  |             3   |  {del}     20   |    %       37   |    6       54   |
+  |             4   |            21   |    &       38   |    7       55   |
+  | {white}     5   |            22   |    '       39   |    8       56   |
+  |             6   |            23   |    (       40   |    9       57   |
+  |             7   |            24   |    )       41   |    :       58   |
+  | disSHIFT+C= 8   |            25   |    *       42   |    ;       59   |
+  | enaSHIFT+C= 9   |            26   |    +       43   |    <       60   |
+  |            10   |            27   |    ,       44   |    =       61   |
+  |            11   |  {red}     28   |    -       45   |    >       62   |
+  |            12   | {right}    29   |    .       46   |    ?       63   |
+  | return     13   | {green}    30   |    /       47   |    @       64   |
+  | lower case 14   |  {blue}    31   |    0       48   |    A       65   |
+  |            15   |  SPACE     32   |    1       49   |    B       66   |
+  |            16   |    !       33   |    2       50   |    C       67   |
+  +-----------------+-----------------+-----------------+-----------------+
+  |  PRINTS   CHR$  |  PRINTS   CHR$  |  PRINTS   CHR$  |  PRINTS   CHR$  |
+  +-----------------+-----------------+-----------------+-----------------+
+  |    D       68   |            97   |           126   | {grey 3}  155   |
+  |    E       69   |            98   |           127   | {purple}  156   |
+  |    F       70   |            99   |           128   | {left}    157   |
+  |    G       71   |           100   | {orange}  129   | {yellow}  158   |
+  |    H       72   |           101   |           130   |  {cyan}   159   |
+  |    I       73   |           102   |           131   |  SPACE    160   |
+  |    J       74   |           103   |           132   |           161   |
+  |    K       75   |           104   |    f1     133   |           162   |
+  |    L       76   |           105   |    f3     134   |           163   |
+  |    M       77   |           106   |    f5     135   |           164   |
+  |    N       78   |           107   |    f7     136   |           165   |
+  |    O       79   |           108   |    f2     137   |           166   |
+  |    P       80   |           109   |    f4     138   |           167   |
+  |    Q       81   |           110   |    f6     139   |           168   |
+  |    R       82   |           111   |    f8     140   |           169   |
+  |    S       83   |           112   |shift+ret. 141   |           170   |
+  |    T       84   |           113   |upper case 142   |           171   |
+  |    U       85   |           114   |           143   |           172   |
+  |    V       86   |           115   | {black}   144   |           173   |
+  |    W       87   |           116   |   {up}    145   |           174   |
+  |    X       88   |           117   | {rvs off} 146   |           175   |
+  |    Y       89   |           118   | {clear}   147   |           176   |
+  |    Z       90   |           119   |  {inst}   148   |           177   |
+  |    [       91   |           120   | {brown}   149   |           178   |
+  |  pound     92   |           121   | {lt. red} 150   |           179   |
+  |    ]       93   |           122   | {grey 1}  151   |           180   |
+  |    ^       94   |           123   | {grey 2}  152   |           181   |
+  |{arrow left}95   |           124   | {lt.green}153   |           182   |
+  |            96   |           125   | {lt.blue} 154   |           183   |
+  +-----------------+-----------------+-----------------+-----------------+
+  |  PRINTS   CHR$  |  PRINTS   CHR$  |  PRINTS   CHR$  |  PRINTS   CHR$  |
+  +-----------------+-----------------+-----------------+-----------------+
+  |           184   |           186   |           188   |           190   |
+  |           185   |           187   |           189   |           191   |
+  +-----------------+-----------------+-----------------+-----------------+
+
+  CODES 192-223 SAME AS  96-127
+  CODES 224-254 SAME AS 160-190
+  CODE 255 SAME AS 126
