@@ -6,8 +6,9 @@ EXE = u64view
 all: $(EXE)
 
 SOURCE=*.c
+HEADER=*.h
 
-$(EXE): $(SOURCE)
+$(EXE): $(SOURCE) $(HEADER)
 	$(CC) -O2 $(SOURCE) -o$(EXE) $(LDFLAGS)
 
 clean:

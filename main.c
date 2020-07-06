@@ -6,48 +6,30 @@
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_net.h>
 #include <inttypes.h>
-#include "64.h"
-
 #include <sys/socket.h>             //socket
 #include <arpa/inet.h>              //inet_addr
 #include <unistd.h>
 
+#include "64.h"
+#include "keys.h"
+
+// https://github.com/GideonZ/1541ultimate/blob/master/software/network/socket_dma.cc
+#define SOCKET_CMD_KEYB                0xFF03 /* simulate keyboard input */
+#define SOCKET_CMD_RESET               0xFF04 /* reset the c64 */
+#define SOCKET_CMD_WAIT                0xFF05 /* wait n ticks */
+#define SOCKET_CMD_VICSTREAM_ENABLE    0xFF20
+#define SOCKET_CMD_SIDSTREAM_ENABLE    0xFF21
+#define SOCKET_CMD_DEBUGSTREAM_ENABLE  0xFF22
+#define SOCKET_CMD_VICSTREAM_DISABLE   0xFF30
+#define SOCKET_CMD_SIDSTREAM_DISABLE   0xFF31
+#define SOCKET_CMD_DEBUGSTREAM_DISABLE 0xFF32
+#define SOCKET_CMD_READMEM             0xFF74 /* read memory? not working :( */
 #define ERROR_SEND_FAILED       -1
 #define ERROR_RECIEVE_FAILED    -2
 #define ERROR_CONNECT_FAILED    -3
 #define ERROR_SOCKET_FAILED     -4
 #define ERROR_WINSOCK_FAILED    -5
-
 #define ERROR_VALUE_MISSING     -42
-
-#define SOCKET_CMD_DMA          0xFF01 /* dma-load .prg file */
-#define SOCKET_CMD_DMARUN       0xFF02 /* dma-load .prg file and run it */
-#define SOCKET_CMD_KEYB         0xFF03 /* simulate keyboard input */
-#define SOCKET_CMD_RESET        0xFF04 /* reset the c64 */
-#define SOCKET_CMD_WAIT         0xFF05 /* wait n ticks */
-#define SOCKET_CMD_DMAWRITE     0xFF06 /* write c64 memory */
-#define SOCKET_CMD_REUWRITE     0xFF07
-#define SOCKET_CMD_KERNALWRITE  0xFF08
-#define SOCKET_CMD_DMAJUMP      0xFF09 /* dma-load .prg file and jump to addr */
-#define SOCKET_CMD_MOUNT_IMG    0xFF0A /* mount image */
-#define SOCKET_CMD_RUN_IMG      0xFF0B /* mount and run image */
-
-// Only available on U64
-#define SOCKET_CMD_VICSTREAM_ENABLE    0xFF20
-#define SOCKET_CMD_SIDSTREAM_ENABLE    0xFF21
-#define SOCKET_CMD_DEBUGSTREAM_ENABLE  0xFF22
-
-#define SOCKET_CMD_VICSTREAM_DISABLE   0xFF30
-#define SOCKET_CMD_SIDSTREAM_DISABLE   0xFF31
-#define SOCKET_CMD_DEBUGSTREAM_DISABLE 0xFF32
-
-// Undocumented, shall only be used by developers
-#define SOCKET_CMD_LOADSIDCRT   0xFF71 /* send 8k SID cartridge image? not working :/ */
-#define SOCKET_CMD_LOADBOOTCRT  0xFF72 /* send 8k cartridge image? not working :/ */
-#define SOCKET_CMD_SAMPLE       0xFF73 /* removed */
-#define SOCKET_CMD_READMEM      0xFF74 /* read memory? not working :( */
-#define SOCKET_CMD_READFLASH    0xFF75
-#define SOCKET_CMD_READDBGREG   0xFF76 /* read and write the debug register d7ff */
 
 typedef struct __attribute__((__packed__)) {
     uint16_t seq;
@@ -68,7 +50,7 @@ typedef struct __attribute__((__packed__)) {
 uint64_t totalVdataBytes=0, totalAdataBytes=0;
 
 char *hostName = NULL;
-in_addr_t u64_addr = 0;
+struct sockaddr_in server;
 
 char ipStr[64];
 char* intToIp(uint32_t ip) {
@@ -94,6 +76,9 @@ uint64_t ublue[] =  { 10,255,30,40,50,60,70,80,90,0xa0,0xb0,0xc0,0xd0,0xc0,0xd0,
 int curColors=0;
 const uint64_t *red = sred, *green =sgreen, *blue=sblue;;
 uint64_t pixMap[0x100];
+int isStreaming=0;
+int verbose=0;
+
 
 void setColors(int colors) {
 
@@ -126,13 +111,14 @@ void setColors(int colors) {
     }
 }
 
-int verbose=0;
+
 void chkSeq(const char* msg, uint16_t *lseq, uint16_t cseq) {
     if((uint16_t)(*lseq+1) != cseq && (totalAdataBytes>1024*10 && totalVdataBytes > 1024*1024) ) {
         printf(msg, *lseq, cseq);
     }
     *lseq=cseq;
 }
+
 
 void pic(SDL_Texture* tex, int width, int height, int pitch, uint32_t* pixels) {
     union {
@@ -152,162 +138,92 @@ void pic(SDL_Texture* tex, int width, int height, int pitch, uint32_t* pixels) {
     }
 }
 
+
+// Send a command to the U64 through a network socket
 int u64_command(int command, unsigned char *data, int len) {
     int sock;
-    struct sockaddr_in server;
-	unsigned char cmd[4];
+    unsigned char cmd[4];
 
-	cmd[0] = command & 0xff;
+    cmd[0] = command & 0xff;
     cmd[1] = command >> 8;
-	cmd[2] = len & 0xff;
-	cmd[3] = len >> 8;
+    cmd[2] = len & 0xff;
+    cmd[3] = len >> 8;
 
     if ((sock = socket(AF_INET , SOCK_STREAM , 0)) < 0) {
-	    printf("Failed to create socket.\n");
+        printf("Failed to create socket.\n");
         return ERROR_SOCKET_FAILED;
     }
 
-    server.sin_addr.s_addr = u64_addr;
-    server.sin_family = AF_INET;
-    server.sin_port = htons( 64 );
-
     if (connect(sock, (struct sockaddr *)&server, sizeof(server)) < 0) {
-	    printf("Failed to connect socket to %x.\n", u64_addr);
+        printf("Failed to connect socket to %x.\n", server.sin_addr.s_addr);
         return ERROR_CONNECT_FAILED;
     }
 
     int rv = ERROR_SEND_FAILED;
 
     if (send(sock, &cmd[0], 4, 0) >= 0) {
-	    if (len > 0 && send(sock, data, len, 0) >= 0) {
-		    rv = 0;
-		}
+        if (len > 0 && send(sock, data, len, 0) >= 0) {
+            rv = 0;
+        }
     }
 
-	close(sock);
+    close(sock);
     return rv;
 }
 
-void u64_reset() {
+
+// Send a simple command with no arguments to the U64
+void u64_do(int command, char* name) {
     int ret;
-    ret = u64_command(SOCKET_CMD_RESET, NULL, 0);
-	if (ret == 0) {
-	    printf("u64_reset sent.\n");
-	} else {
-	    printf("u64_reset failed with code %d.\n", ret);
-	}
+    ret = u64_command(command, NULL, 0);
+    if (ret == 0) {
+        printf("u64_do %s sent.\n", name);
+    } else {
+        printf("u64_do %s failed with code %d.\n", name, ret);
+    }
 }
+
+
+void u64_reset() {
+    u64_do(SOCKET_CMD_RESET, "u64_reset");
+}
+
+
+void u64_startstreams() {
+    u64_do(SOCKET_CMD_VICSTREAM_ENABLE, "u64_vicstream_enable");
+    u64_do(SOCKET_CMD_SIDSTREAM_ENABLE, "u64_sidstream_enable");
+}
+
+
+void u64_stopstreams() {
+    u64_do(SOCKET_CMD_VICSTREAM_DISABLE, "u64_vicstream_disable");
+    u64_do(SOCKET_CMD_SIDSTREAM_DISABLE, "u64_sidstream_disable");
+}
+
 
 void u64_key(int petscii) {
     int ret;
     unsigned char key[1];
-	key[0] = petscii & 0xff;
+    key[0] = petscii & 0xff;
     ret = u64_command(SOCKET_CMD_KEYB, (unsigned char *)&key, 1);
-	if (ret == 0) {
-	    printf("u64_key(%d) sent.\n", petscii);
-	} else {
-	    printf("u64_key(%d) failed with code %d.\n", petscii, ret);
-	}
-}
-
-void sendSequence(char *hostName, const uint8_t *data, int len) {
-    IPaddress ip;
-    TCPsocket sock;
-    uint8_t buf[1024];
-    SDLNet_SocketSet set;
-    set=SDLNet_AllocSocketSet(1);
-    int result =0;
-
-    if(SDLNet_ResolveHost(&ip, hostName, 23)) {
-        printf("Error resolving '%s' : %s\n", hostName, SDLNet_GetError());
-        return;
+    if (ret == 0) {
+        printf("u64_key(%d) sent.\n", petscii);
+    } else {
+        printf("u64_key(%d) failed with code %d.\n", petscii, ret);
     }
+}
 
-    sock = SDLNet_TCP_Open(&ip);
-    if(!sock) {
-        printf("Error connecting to '%s' : %s\n", hostName, SDLNet_GetError());
-        return;
+
+int lookup_keymap(int *keymap, int sym) {
+    for (int i = 0; ; i += 2) {
+        if (keymap[i] == sym)
+            return keymap[i + 1];
+        if (keymap[i] == 0)
+            break;
     }
-
-    SDLNet_TCP_AddSocket(set, sock);
-
-    SDL_Delay(10);
-    for(int i=0; i < len; i++) {
-        SDL_Delay(1);
-        if(SDLNet_TCP_Send(sock, &data[i], 1) <1 ) {
-            printf("Error sending command data: %s\n", SDLNet_GetError());
-        }
-        // Empty u64 send buffer
-        while( SDLNet_CheckSockets(set, 30) == 1 ) {
-            result = SDLNet_TCP_Recv(sock, &buf, 1023);
-            buf[result]=0;
-            //puts(buf); // debug, messes up terminal.
-        }
-    }
-
-    SDLNet_TCP_Close(sock);
+    return 0;
 }
 
-int isStreaming=0;
-// Yeye, these are fragile, they're good enough for now.
-void startStream(char *hostName) {
-    const uint8_t data[] = {
-        0x1b, 0x5b, 0x31, 0x35, 0x7e, // f5
-        0x1b, 0x5b, 0x42, // Arrow down
-        0x1b, 0x5b, 0x42,
-        0x1b, 0x5b, 0x42,
-        0x1b, 0x5b, 0x42,
-        0xd, 0x00, //enter
-        0xd, 0x00,
-        0x1b, 0x5b, 0x31, 0x35, 0x7e, // f5
-        0x1b, 0x5b, 0x42, // arrow down
-        0x1b, 0x5b, 0x42,
-        0x1b, 0x5b, 0x42,
-        0x1b, 0x5b, 0x42,
-        0x1b, 0x5b, 0x42,
-        0x1b, 0x5b, 0x42,
-        0xd, 0x00, //enter
-        0xd, 0x00
-    };
-    printf("Sending start stream sequence to Ultimate64...\n");
-    sendSequence(hostName, data, sizeof(data));
-    printf("  * done.\n");
-    isStreaming=1;
-}
-
-void stopStream(char* hostName) {
-    const uint8_t data[] = {
-        0x1b, 0x5b, 0x31, 0x35, 0x7e, // f5
-        0x1b, 0x5b, 0x42, // Arrow down
-        0x1b, 0x5b, 0x42,
-        0x1b, 0x5b, 0x42,
-        0x1b, 0x5b, 0x42,
-        0x1b, 0x5b, 0x42,
-        0xd, 0x00, //enter
-        0x1b, 0x5b, 0x31, 0x35, 0x7e, // f5
-        0x1b, 0x5b, 0x42, // arrow down
-        0x1b, 0x5b, 0x42,
-        0x1b, 0x5b, 0x42,
-        0x1b, 0x5b, 0x42,
-        0x1b, 0x5b, 0x42,
-        0x1b, 0x5b, 0x42,
-        0x1b, 0x5b, 0x42,
-        0xd, 0x00, //enter
-    };
-    printf("Sending stop stream sequence to Ultimate64...\n");
-    sendSequence(hostName, data, sizeof(data));
-    printf("  * done.\n");
-    isStreaming=0;
-}
-
-/* void reset(int sock) { */
-/*     int ret; */
-/*     printf("Sending RESET command.\n"); */
-/*     ret = ultimate_reset(sock); */
-/*     if (ret < 0) { */
-/*         printf("Reset failed with return code %d.\n", ret); */
-/*     } */
-/* } */
 
 void printColors(const uint64_t *red, const uint64_t *green, const uint64_t *blue) {
     for(int i=0; i < 16; i++) {
@@ -315,6 +231,7 @@ void printColors(const uint64_t *red, const uint64_t *green, const uint64_t *blu
     }
 
 }
+
 
 int main(int argc, char** argv) {
 
@@ -483,8 +400,10 @@ int main(int argc, char** argv) {
             }
             if(i+1 < argc) {
                 i++;
-                hostName=argv[i];
-				u64_addr=inet_addr(hostName);
+                hostName = argv[i];
+                server.sin_addr.s_addr = inet_addr(hostName);
+                server.sin_family = AF_INET;
+                server.sin_port = htons(64);
             } else {
                 printf("Missing IP address.\n");
                 return 1;
@@ -513,7 +432,7 @@ int main(int argc, char** argv) {
     }
 
     if(hostName && startStreamOnStart) {
-        startStream(hostName);
+        u64_startstreams();
     }
 
     set=SDLNet_AllocSocketSet(2);
@@ -597,128 +516,67 @@ int main(int argc, char** argv) {
     int r;
     int mod;
     int sym;
+    int add;
+    int code;
     int lowercase = 0;
-    int num_shift[10] = {41, 33, 64, 35, 36, 37, 94, 38, 42, 40};
 
     while (run) {
         while (SDL_PollEvent(&event)) {
             switch (event.type) {
             case SDL_KEYDOWN:
-	        mod = event.key.keysym.mod;
-	        sym = event.key.keysym.sym;
-		printf("KEYDOWN: mod=%d, sym=%d\n", mod, sym);
-	        switch (mod) {
-		case KMOD_NONE:
-		    // No modifiers pressed
-		    switch (sym) {
-		    case SDLK_ESCAPE:
-		        run = 0; break;
-		    case SDLK_F12:
-		        u64_reset(); break;
-		    case SDLK_RETURN:
-		        u64_key(13); break;
-		    case SDLK_F1:
-		        u64_key(133); break;
-		    case SDLK_F2:
-		        u64_key(137); break;
-		    case SDLK_F3:
-		        u64_key(134); break;
-		    case SDLK_F4:
-		        u64_key(138); break;
-		    case SDLK_F5:
-		        u64_key(135); break;
-		    case SDLK_F6:
-		        u64_key(139); break;
-		    case SDLK_F7:
-		        u64_key(136); break;
-		    case SDLK_F8:
-		        u64_key(140); break;
-		    case SDLK_LEFT:
-		        u64_key(157); break;
-		    case SDLK_RIGHT:
-		        u64_key(29); break;
-		    case SDLK_UP:
-		        u64_key(145); break;
-		    case SDLK_DOWN:
-		        u64_key(17); break;
-		    case SDLK_HOME:
-		        u64_key(19); break;
-		    case SDLK_LEFTBRACKET:
-		        u64_key(91); break;
-		    case SDLK_RIGHTBRACKET:
-		        u64_key(93); break;
-		    case SDLK_BACKQUOTE:
-		        u64_key(95); break; // Arrow left
-		    case SDLK_BACKSLASH:
-		        u64_key(255); break; // PI symbol
-		    case SDLK_BACKSPACE:
-		        u64_key(20); break;
-		    case SDLK_INSERT:
-		        u64_key(148); break;
-		    case SDLK_DELETE:
-		        u64_key(29); u64_key(20); break;
-		    default:
-		        if (sym >= SDLK_SPACE && sym <= SDLK_AT)
-			    u64_key(sym);
-			else if (sym >= SDLK_a && sym <= SDLK_z)
-			    u64_key(sym - 32);
-		    }
-		    break;
-		case KMOD_LSHIFT:
-		case KMOD_RSHIFT:
-		    // Shift pressed
-		    switch (sym) {
-		    case SDLK_RETURN:
-		        u64_key(141); break;
-		    case SDLK_SPACE:
-		        u64_key(160); break;
-		    case SDLK_HOME:
-		        u64_key(147); break;
-		    case SDLK_EQUALS:
-		        u64_key(43); break;
-		    case SDLK_SEMICOLON:
-		        u64_key(58); break;
-		    case SDLK_QUOTE:
-		        u64_key(34); break;
-		    case SDLK_COMMA:
-		        u64_key(60); break;
-		    case SDLK_PERIOD:
-		        u64_key(62); break;
-		    case SDLK_SLASH:
-		        u64_key(63); break;
-		    case SDLK_MINUS:
-		        u64_key(92); break; // Pound symbol
-		    case SDLK_PAGEUP:
-		        u64_key(18); break; // Reverse on
-		    case SDLK_PAGEDOWN:
-		        u64_key(146); break; // Reverse off
-		    default:
-		        if (sym >= SDLK_0 && sym <= SDLK_9)
-		            u64_key(num_shift[sym - SDLK_0]);
-		        else if (sym >= SDLK_a && sym <= SDLK_z)
-		            u64_key(sym);
-		    }
-		    break;
-		case KMOD_LCTRL:
-		case KMOD_RCTRL:
-		    // Control pressed
-		    switch (event.key.keysym.sym) {
-		    case SDLK_c:
-		        u64_key(3); break; // Stop
-		    }
-		    break;
-		case KMOD_LALT:
-		case KMOD_RALT:
-		    // Alt pressed
-		    switch (event.key.keysym.sym) {
-		    }
-		    break;
-		case KMOD_LALT + KMOD_LCTRL:
-		    u64_key(14 + lowercase);
-		    lowercase = 128 - lowercase;
-		    break;
-		}
-		break;
+                mod = event.key.keysym.mod;
+                sym = event.key.keysym.sym;
+                add = 0;
+                code = 0;
+                //printf("KEYDOWN: mod=%d, sym=%d\n", mod, sym);
+                switch (mod) {
+                case KMOD_NONE:
+                    // No modifiers
+                    if (sym >= SDLK_a && sym <= SDLK_z) {
+                        add = sym - SDLK_a;
+                        sym = SDLK_a;
+                    }
+                    else if (sym >= SDLK_0 && sym <= SDLK_9) {
+                        add = sym - SDLK_0;
+                        sym = SDLK_0;
+                    }
+                    if ((code = lookup_keymap((int *)&keymap_nomod, sym)) > 0)
+                        u64_key(code + add);
+                    break;
+                case KMOD_LSHIFT:
+                case KMOD_RSHIFT:
+                    // Shift pressed
+                    if (sym >= SDLK_a && sym <= SDLK_z) {
+                        add = sym - SDLK_a;
+                        sym = SDLK_a;
+                    }
+                    if ((code = lookup_keymap((int *)&keymap_shift, sym)) > 0)
+                        u64_key(code + add);
+                    break;
+                case KMOD_LCTRL:
+                case KMOD_RCTRL:
+                    // Control pressed
+                    if ((code = lookup_keymap((int *)&keymap_ctrl, sym)) > 0)
+                        u64_key(code);
+                    break;
+                case KMOD_LALT:
+                case KMOD_RALT:
+                    // Alt pressed
+                    if ((code = lookup_keymap((int *)&keymap_alt, sym)) > 0)
+                        u64_key(code);
+                    break;
+                case KMOD_LALT + KMOD_LSHIFT:
+                    // Alt+Shift pressed: simulate C= + Shift
+                    u64_key(14 + lowercase);
+                    lowercase = 128 - lowercase;
+                    break;
+                }
+                // Handle special codes
+                if (code == CODE_RESET)
+                    u64_reset();
+                else if (code == CODE_QUIT)
+                    run = 0;
+                break;
             case SDL_QUIT:
                 run = 0; break;
             }
@@ -827,7 +685,7 @@ int main(int argc, char** argv) {
     }
 
     if(hostName && stopStreamOnExit) {
-        stopStream(hostName);
+        u64_stopstreams();
     }
 
     SDL_DestroyTexture(tex);
@@ -847,6 +705,6 @@ int main(int argc, char** argv) {
     if(verbose) {
         printf("\nReceived video data: %"PRIu64" bytes.\nReceived audio data: %"PRIu64" bytes.\n", totalVdataBytes, totalAdataBytes);
     }
-    printf("\n\nThanks to Jens Blidon and Markus Schneider for making my favourite tunes!\nThanks to Booze for making the best remix of Chicanes Halcyon and such beautiful visuals to go along with it!\nThanks to Gideons Logic for the U64!\n\n                                    - DusteD says hi! :-)\n\n");
+    //printf("\n\nThanks to Jens Blidon and Markus Schneider for making my favourite tunes!\nThanks to Booze for making the best remix of Chicanes Halcyon and such beautiful visuals to go along with it!\nThanks to Gideons Logic for the U64!\n\n                                    - DusteD says hi! :-)\n\n");
     return 0;
 }
