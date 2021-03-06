@@ -23,6 +23,8 @@
 #define TCP_BUFFER_SIZE 1024
 #define TELNET_PORT 23
 #define SDLNET_TIMEOUT 30
+#define SDLNET_STREAM_TIMEOUT 200
+#define USER_COLORS 16*6 + 15 // 16 6 byte values + the 15 commas between them
 
 typedef struct __attribute__((__packed__)) {
 	uint16_t seq;
@@ -141,9 +143,9 @@ void setColors(colorScheme colors)
 			green = ugreen;
 			blue = ublue;
 			break;
-		default:
 		/* fall through */
 		case SCOLORS:
+		default:
 			red = sred;
 			green = sgreen;
 			blue = sblue;
@@ -237,6 +239,7 @@ void sendSequence(char *hostName, const uint8_t *data, int len)
 void startStream(char *hostName)
 {
 	const uint8_t data[] = {
+		// Video stream
 		0x1b, 0x5b, 0x31, 0x35, 0x7e, // f5
 		0x1b, 0x5b, 0x42, // Arrow down
 		0x1b, 0x5b, 0x42,
@@ -247,6 +250,20 @@ void startStream(char *hostName)
 		0x1b, 0x5b, 0x42,
 		0x1b, 0x5b, 0x42,
 		0xd, 0x00, //enter
+		0xd, 0x00,
+		0xd, 0x00,
+		// Audio stream
+		0x1b, 0x5b, 0x31, 0x35, 0x7e, // f5
+		0x1b, 0x5b, 0x42, // Arrow down
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0xd, 0x00, //enter
+		0x1b, 0x5b, 0x42, // Arrow down
 		0xd, 0x00,
 		0xd, 0x00
 	};
@@ -260,6 +277,7 @@ void startStream(char *hostName)
 void stopStream(char* hostName)
 {
 	const uint8_t data[] = {
+		// Video stream
 		0x1b, 0x5b, 0x31, 0x35, 0x7e, // f5
 		0x1b, 0x5b, 0x42, // Arrow down
 		0x1b, 0x5b, 0x42,
@@ -270,6 +288,19 @@ void stopStream(char* hostName)
 		0x1b, 0x5b, 0x42,
 		0x1b, 0x5b, 0x42,
 		0xd, 0x00, //enter
+		0xd, 0x00,
+		// Audio stream
+		0x1b, 0x5b, 0x31, 0x35, 0x7e, // f5
+		0x1b, 0x5b, 0x42, // Arrow down
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0x1b, 0x5b, 0x42,
+		0xd, 0x00, //enter
+		0x1b, 0x5b, 0x42, // Arrow down
 		0xd, 0x00
 	};
 
@@ -379,10 +410,6 @@ int parseArguments(int argc, char **argv, programData *data)
 	while ((c = getopt (argc, argv, "l:a:z:fsvVcmtT:u:U:I:o:")) != -1) {
 		switch(c) {
 			case 'l':
-				if (!strlen(optarg)) {
-					printf("Missing video port number\n");
-					return EXIT_FAILURE;
-				}
 				data->listen = atoi(optarg);
 				if (data->listen == 0) {
 					printf("Video port must be an integer larger than 0.\n");
@@ -390,10 +417,6 @@ int parseArguments(int argc, char **argv, programData *data)
 				}
 				break;
 			case 'a':
-				if (!strlen(optarg)) {
-					printf("Missing audio port number\n");
-					return EXIT_FAILURE;
-				}
 				data->listenaudio = atoi(optarg);
 				if (data->listenaudio == 0) {
 					printf("Audio port must be an integer larger than 0.\n");
@@ -401,10 +424,6 @@ int parseArguments(int argc, char **argv, programData *data)
 				}
 				break;
 			case 'z':
-				if (!strlen(optarg)) {
-					printf("Missing scale value\n");
-					return EXIT_FAILURE;
-				}
 				data->scale = atoi(optarg);
 				if (data->scale == 0) {
 					printf("Scale must be an integer larger than 0.\n");
@@ -438,29 +457,14 @@ int parseArguments(int argc, char **argv, programData *data)
 				printf("Using DusteDs CRT colors.\n");
 				break;
 			case 'T':
-				if (!strlen(optarg)) {
-					printf("User-defined color option (-T):\n\n    Default colors: ");
-					printColors(sred, sgreen, sblue);
-					printf("\n    DusteDs colors: ");
-					printColors(dred, dgreen, dblue);
-					printf("\n\n    If you want to use your own color values, just type them after -T in the format shown above (RGB24 in hex, like HTML, and comma between each color).\n"
-							"    The colors are, in order: black, white, red, cyan, purple, green, blue, yellow, orange, brown, pink, dark-grey, grey, light-green, light-blue, light-grey.\n"
-							"    Example: DusteDs colors, with a slightly darker blue: -T 060a0b,f2f1f1,b63c47,a2f7ed,af45d7,86f964,0030Ef,f8fe8a,d06e28,794e00,fb918f,5e6e69,a3b6ad,d1fcc5,6eb3ff,dce2db\n\n\n");
-					return EXIT_FAILURE;
-				}
-				const int ucbytes = 16*6 + 15; // 16 6 byte values + the 15 commas between them
-				if (strlen(optarg) != ucbytes) {
-					printf("Error: Expected a string of exactly %i characters (see  -T without parameter to see examples)\n", ucbytes);
+				if (strlen(optarg) != USER_COLORS) {
+					printf("Error: Expected a string of exactly %i characters (see  -T without parameter to see examples)\n", USER_COLORS);
 					return EXIT_FAILURE;
 				}
 				setUserColors(optarg);
 				data->curColors = UCOLORS;
 				break;
 			case 'o':
-				if (!strlen(optarg)) {
-					printf("Missing filename\n");
-					return EXIT_FAILURE;
-				}
 				data->verbose=1;
 				printf("Turning on verbose mode, so you can see if you miss any data!\n");
 				printf("Outputting video to %s.rgb and audio to %s.pcm ...\n", optarg, optarg);
@@ -485,29 +489,32 @@ int parseArguments(int argc, char **argv, programData *data)
 				}
 				break;
 			case 'u':
-				if (!strlen(optarg)) {
-					printf("Error: missing IP address\n");
-					return EXIT_FAILURE;
-				}
 				strncpy(data->hostName, optarg, MAX_STRING_SIZE - 1);
 				break;
 			case 'U':
-				if (!strlen(optarg)) {
-					printf("Error: missing IP address\n");
-					return EXIT_FAILURE;
-				}
 				strncpy(data->hostName, optarg, MAX_STRING_SIZE - 1);
 				data->stopStreamOnExit=0;
 				break;
 			case 'I':
-				if (!strlen(optarg)) {
-					printf("Error: missing IP address\n");
-					return EXIT_FAILURE;
-				}
 				strncpy(data->hostName, optarg, MAX_STRING_SIZE - 1);
 				data->stopStreamOnExit=0;
 				data->startStreamOnStart=0;
 				break;
+			case '?':
+				if (optopt == 'l' || optopt == 'a' || optopt == 'z' ||
+				    optopt == 'u' || optopt  == 'U' || optopt == 'I') {
+					printf("Option -%c requires an argument.\n", optopt);
+					return EXIT_FAILURE;
+				} else if (optopt == 'T') {
+					printf("User-defined color option (-T):\n\n    Default colors: ");
+					printColors(sred, sgreen, sblue);
+					printf("\n    DusteDs colors: ");
+					printColors(dred, dgreen, dblue);
+					printf("\n\n    If you want to use your own color values, just type them after -T in the format shown above (RGB24 in hex, like HTML, and comma between each color).\n"
+							"    The colors are, in order: black, white, red, cyan, purple, green, blue, yellow, orange, brown, pink, dark-grey, grey, light-green, light-blue, light-grey.\n"
+							"    Example: DusteDs colors, with a slightly darker blue: -T 060a0b,f2f1f1,b63c47,a2f7ed,af45d7,86f964,0030Ef,f8fe8a,d06e28,794e00,fb918f,5e6e69,a3b6ad,d1fcc5,6eb3ff,dce2db\n\n\n");
+					return EXIT_FAILURE;
+				}
 			case 'h':
 				/* fall through */
 			default:
@@ -781,7 +788,7 @@ void runStream(programData *data)
 				SDL_RenderPresent(data->ren);
 			}
 		}
-		SDLNet_CheckSockets(data->set, 200);
+		SDLNet_CheckSockets(data->set, SDLNET_STREAM_TIMEOUT);
 	}
 
 	if(strlen(data->hostName) && data->stopStreamOnExit) {
