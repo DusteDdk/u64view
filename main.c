@@ -3,12 +3,26 @@
  * Copyleft 2019 DusteD
  */
 #include <stdio.h>
+#include <ctype.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <inttypes.h>
+#include <getopt.h>
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_net.h>
-#include <inttypes.h>
 #include "64.h"
 
-
+#define MAX_STRING_SIZE 4096
+#define UDP_PAYLOAD_SIZE 768
+#define SAMPLE_SIZE 192*4
+#define IP_ADDR_SIZE 64
+#define DEFAULT_LISTEN_PORT 11000
+#define DEFAULT_LISTENAUDIO_PORT 11001
+#define DEFAULT_WIDTH 384
+#define DEFAULT_HEIGHT 272
+#define TCP_BUFFER_SIZE 1024
+#define TELNET_PORT 23
+#define SDLNET_TIMEOUT 30
 
 typedef struct __attribute__((__packed__)) {
 	uint16_t seq;
@@ -18,18 +32,80 @@ typedef struct __attribute__((__packed__)) {
 	uint8_t linexInPacket;
 	uint8_t bpp;
 	uint16_t encoding;
-	char payload[768];
+	char payload[UDP_PAYLOAD_SIZE];
 } u64msg_t;
 
 typedef struct __attribute__((__packed__)) {
 	uint16_t seq;
-	int16_t sample[192*4];
+	int16_t sample[SAMPLE_SIZE];
 } a64msg_t;
 
-uint64_t totalVdataBytes=0, totalAdataBytes=0;
+typedef enum {
+	SCOLORS,
+	DCOLORS,
+	UCOLORS,
+	NUM_OF_COLORSCHEMES
+} colorScheme;
 
-char ipStr[64];
-char* intToIp(uint32_t ip) {
+uint64_t totalVdataBytes=0;
+uint64_t totalAdataBytes=0;
+int isStreaming=0;
+
+char ipStr[IP_ADDR_SIZE];
+
+typedef struct {
+	int scale;
+	int fullscreenFlag;
+	int renderFlag;
+	int vsyncFlag;
+	int verbose;
+	int fast;
+	int audioFlag;
+	colorScheme curColors;
+	FILE *vfp;
+	FILE *afp;
+	char fnbuf[MAX_STRING_SIZE];
+	char hostName[MAX_STRING_SIZE];
+	int stopStreamOnExit;
+	int startStreamOnStart;
+	int showHelp;
+	UDPpacket *pkg;
+	UDPpacket *audpkg;
+	SDLNet_SocketSet set;
+	UDPsocket udpsock;
+	UDPsocket audiosock;
+	int listen;
+	int listenaudio;
+	SDL_AudioSpec want;
+	SDL_AudioSpec have;
+	SDL_AudioDeviceID dev;
+	SDL_Window *win;
+	int width;
+	int height;
+	SDL_Renderer *ren;
+	SDL_Texture *tex;
+	uint32_t *pixels;
+	int pitch;
+} programData;
+
+void setDefaults(programData *data)
+{
+	memset(data, 0, sizeof(programData));
+	data->scale = 1;
+	data->renderFlag = SDL_RENDERER_ACCELERATED;
+	data->fast = 1;
+	data->audioFlag = SDL_INIT_AUDIO;
+	data->curColors = SCOLORS;
+	data->stopStreamOnExit = 1;
+	data->startStreamOnStart = 1;
+	data->listen = DEFAULT_LISTEN_PORT;
+	data->listenaudio = DEFAULT_LISTENAUDIO_PORT;
+	data->width = DEFAULT_WIDTH;
+	data->height = DEFAULT_HEIGHT;
+}
+
+char* intToIp(uint32_t ip)
+{
 	sprintf(ipStr, "%02i.%02i.%02i.%02i", (ip & 0x000000ff), (ip & 0x0000ff00)>>8, (ip & 0x00ff0000) >> 16, (ip & 0xff000000) >> 24);
 	return ipStr;
 }
@@ -49,27 +125,28 @@ uint64_t ured[] =   { 10,255,30,40,50,60,70,80,90,0xa0,0xb0,0xc0,0xd0,0xc0,0xd0,
 uint64_t ugreen[] = { 10,255,30,40,50,60,70,80,90,0xa0,0xb0,0xc0,0xd0,0xc0,0xd0,0xe0 };
 uint64_t ublue[] =  { 10,255,30,40,50,60,70,80,90,0xa0,0xb0,0xc0,0xd0,0xc0,0xd0,0xe0 };
 
-int curColors=0;
-const uint64_t *red = sred, *green =sgreen, *blue=sblue;;
+const uint64_t *red = sred, *green =sgreen, *blue=sblue;
 uint64_t pixMap[0x100];
 
-void setColors(int colors) {
-
+void setColors(colorScheme colors)
+{
 	switch(colors) {
-		case 0:
-			red = sred;
-			green = sgreen;
-			blue = sblue;
-			break;
-		case 1:
+		case DCOLORS:
 			red = dred;
 			green = dgreen;
 			blue = dblue;
 			break;
-		case 2:
+		case UCOLORS:
 			red = ured;
 			green = ugreen;
 			blue = ublue;
+			break;
+		default:
+		/* fall through */
+		case SCOLORS:
+			red = sred;
+			green = sgreen;
+			blue = sblue;
 			break;
 	}
 
@@ -84,15 +161,16 @@ void setColors(int colors) {
 	}
 }
 
-int verbose=0;
-void chkSeq(const char* msg, uint16_t *lseq, uint16_t cseq) {
+void chkSeq(const char* msg, uint16_t *lseq, uint16_t cseq)
+{
 	if((uint16_t)(*lseq+1) != cseq && (totalAdataBytes>1024*10 && totalVdataBytes > 1024*1024) ) {
 		printf(msg, *lseq, cseq);
 	}
 	*lseq=cseq;
 }
 
-void pic(SDL_Texture* tex, int width, int height, int pitch, uint32_t* pixels) {
+void pic(SDL_Texture* tex, int width, int height, int pitch, uint32_t* pixels)
+{
 	union {
 		uint8_t p[4];
 		uint32_t c;
@@ -110,22 +188,25 @@ void pic(SDL_Texture* tex, int width, int height, int pitch, uint32_t* pixels) {
 	}
 }
 
-void sendSequence(char *hostName, const uint8_t *data, int len) {
+void sendSequence(char *hostName, const uint8_t *data, int len)
+{
 	IPaddress ip;
 	TCPsocket sock;
-	uint8_t buf[1024];
+	uint8_t buf[TCP_BUFFER_SIZE];
 	SDLNet_SocketSet set;
 	set=SDLNet_AllocSocketSet(1);
 	int result =0;
 
-	if(SDLNet_ResolveHost(&ip, hostName, 23)) {
+	if(SDLNet_ResolveHost(&ip, hostName, TELNET_PORT)) {
 		printf("Error resolving '%s' : %s\n", hostName, SDLNet_GetError());
+		SDLNet_FreeSocketSet(set);
 		return;
 	}
 
 	sock = SDLNet_TCP_Open(&ip);
 	if(!sock) {
 		printf("Error connecting to '%s' : %s\n", hostName, SDLNet_GetError());
+		SDLNet_FreeSocketSet(set);
 		return;
 	}
 
@@ -136,20 +217,25 @@ void sendSequence(char *hostName, const uint8_t *data, int len) {
 		SDL_Delay(1);
 		if(SDLNet_TCP_Send(sock, &data[i], 1) <1 ) {
 			printf("Error sending command data: %s\n", SDLNet_GetError());
+			SDLNet_TCP_Close(sock);
+			SDLNet_FreeSocketSet(set);
+			return;
 		}
 		// Empty u64 send buffer
-		while( SDLNet_CheckSockets(set, 30) == 1 ) {
-			result = SDLNet_TCP_Recv(sock, &buf, 1023);
+		while( SDLNet_CheckSockets(set, SDLNET_TIMEOUT) == 1 ) {
+			result = SDLNet_TCP_Recv(sock, &buf, TCP_BUFFER_SIZE - 1);
 			buf[result]=0;
 			//puts(buf); // debug, messes up terminal.
 		}
 	}
 
 	SDLNet_TCP_Close(sock);
+	SDLNet_FreeSocketSet(set);
 }
-int isStreaming=0;
+
 // Yeye, these are fragile, they're good enough for now.
-void startStream(char *hostName) {
+void startStream(char *hostName)
+{
 	const uint8_t data[] = {
 		0x1b, 0x5b, 0x31, 0x35, 0x7e, // f5
 		0x1b, 0x5b, 0x42, // Arrow down
@@ -164,13 +250,15 @@ void startStream(char *hostName) {
 		0xd, 0x00,
 		0xd, 0x00
 	};
+
 	printf("Sending start stream sequence to Ultimate64...\n");
 	sendSequence(hostName, data, sizeof(data));
 	printf("  * done.\n");
 	isStreaming=1;
 }
 
-void stopStream(char* hostName) {
+void stopStream(char* hostName)
+{
 	const uint8_t data[] = {
 		0x1b, 0x5b, 0x31, 0x35, 0x7e, // f5
 		0x1b, 0x5b, 0x42, // Arrow down
@@ -184,6 +272,7 @@ void stopStream(char* hostName) {
 		0xd, 0x00, //enter
 		0xd, 0x00
 	};
+
 	printf("Sending stop stream sequence to Ultimate64...\n");
 	sendSequence(hostName, data, sizeof(data));
 	printf("  * done.\n");
@@ -191,7 +280,8 @@ void stopStream(char* hostName) {
 }
 
 
-void powerOff(char* hostName) {
+void powerOff(char* hostName)
+{
 	const uint8_t data[] = {
 		0x1b, 0x5b, 0x31, 0x35, 0x7e, // f5
 		0x1b, 0x5b, 0x42, // Arrow down
@@ -200,220 +290,220 @@ void powerOff(char* hostName) {
 		0x1b, 0x5b, 0x42,
 		0xd, 0x00, //enter
 	};
+
 	printf("Sending power-off sequence to Ultimate64...\n");
 	sendSequence(hostName, data, sizeof(data));
 	printf("  * done.\n");
 	isStreaming=0;
 }
 
-void reset(char* hostName) {
+void reset(char* hostName)
+{
 	const uint8_t data[] = {
 		0x1b, 0x5b, 0x31, 0x35, 0x7e, // f5
 		0x1b, 0x5b, 0x42, // Arrow down
-		0xd, 0x00, 
+		0xd, 0x00,
 		0xd, 0x00, //enter
 	};
+
 	printf("Sending reset sequence to Ultimate64...\n");
 	sendSequence(hostName, data, sizeof(data));
 	printf("  * done.\n");
 	isStreaming=0;
 }
 
-void printColors(const uint64_t *red, const uint64_t *green, const uint64_t *blue) {
+void printColors(const uint64_t *red, const uint64_t *green, const uint64_t *blue)
+{
 	for(int i=0; i < 16; i++) {
 		printf("%02x%02x%02x%c", (int)red[i], (int)green[i],(int)blue[i], ((i==15)?' ':',') );
 	}
 
 }
 
-int main(int argc, char** argv) {
+void printHelp(void)
+{
+	printf("\nUsage: u64view [-z N |-f] [-s] [-v] [-V] [-c] [-m] [-t] [-T [RGB,...]] [-u IP | -U IP -I IP] [-o FN]\n"
+			"       -z N  (default 1)   Scale the window to N times size, N must be an integer.\n"
+			"       -f    (default off) Fullscreen, will stretch.\n"
+			"       -s    (default off) Prefer software rendering, more cpu intensive.\n"
+			"       -v    (default off) Use vsync.\n"
+			"       -V    (default off) Verbose output, tell when packets are dropped, how much data was transferred.\n"
+			"       -c    (default off) Use more versatile drawing method, more cpu intensive, can't scale.\n"
+			"       -m    (default off) Completely turn off audio.\n"
+			"       -t    (default off) Use colors that look more like DusteDs TV instead of the 'real' colors.\n"
+			"       -T [] (default off) No argument: Show color values and help for -T\n"
+			"       -u IP (default off) Connect to Ultimate64 at IP and command it to start streaming Video and Audio.\n"
+			"       -U IP (default off) Same as -u but don't stop the streaming when u64view exits.\n"
+			"       -I IP (default off) Just know the IP, do nothing, so keys can be used for starting/stopping stream.\n"
+			"       -o FN (default off) Output raw ARGB to FN.rgb and PCM to FN.pcm (20 MiB/s, you disk must keep up or packets are dropped).\n\n");
+}
 
-	SDL_Event event;
-	int run = 1;
-	int sync = 1;
+void setUserColors(char *ucol)
+{
+	printf("Using user-provided colors: ");
+	int pos=0;
+	char colbyte[3] = {0,0,0 };
+	for(int i=0; i < 16; i++) {
+		colbyte[0] = ucol[pos];
+		pos++;
+		colbyte[1] = ucol[pos];
+		pos++;
+		ured[i] = strtol(colbyte, NULL, 16);
 
-	int listen = 11000;
-	int listenaudio = 11001;
-	const int width=384;
-	const int height=272;
+		colbyte[0] = ucol[pos];
+		pos++;
+		colbyte[1] = ucol[pos];
+		pos++;
+		ugreen[i] = strtol(colbyte, NULL, 16);
 
-	uint32_t *pixels = NULL;
-	int pitch=0;
+		colbyte[0] = ucol[pos];
+		pos++;
+		colbyte[1] = ucol[pos];
+		pos++;
+		ublue[i] = strtol(colbyte, NULL, 16);
 
-	SDL_AudioSpec want, have;
-	SDL_AudioDeviceID dev=0;
-	UDPpacket *pkg, *audpkg;
-	UDPsocket udpsock=NULL, audiosock=NULL;
-	SDLNet_SocketSet set;
+		pos++; // Skip character after 6 bytes
+	}
 
-	int scale=1;
-	int renderFlag = SDL_RENDERER_ACCELERATED;
-	int fullscreenFlag = 0;
-	int vsyncFlag = 0;
-	int fast=1;
-	int audioFlag=SDL_INIT_AUDIO;
-	FILE *vfp=NULL, *afp=NULL;
-	char fnbuf[4096], *hostName=NULL;
-	uint16_t lastAseq=0, lastVseq=0;
-	int stopStreamOnExit=1, showHelp=0, startStreamOnStart=1;
+	printColors(ured, ugreen, ublue);
+	printf("\n");
+}
 
+int parseArgument(int argc, char **argv, programData *data)
+{
+	opterr = 0;
+	int c;
 
-	printf("\nUltimate 64 view!\n-----------------\n  Try -h for options.\n\n");
-
-	for(int i=1; i < argc; i++) {
-		if(strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-			printf("\nUsage: u64view [-z N |-f] [-s] [-v] [-V] [-c] [-m] [-t] [-T [RGB,...]] [-u IP | -U IP -I IP] [-o FN]\n"
-					"       -z N  (default 1)   Scale the window to N times size, N must be an integer.\n"
-					"       -f    (default off) Fullscreen, will stretch.\n"
-					"       -s    (default off) Prefer software rendering, more cpu intensive.\n"
-					"       -v    (default off) Use vsync.\n"
-					"       -V    (default off) Verbose output, tell when packets are dropped, how much data was transferred.\n"
-					"       -c    (default off) Use more versatile drawing method, more cpu intensive, can't scale.\n"
-					"       -m    (default off) Completely turn off audio.\n"
-					"       -t    (default off) Use colors that look more like DusteDs TV instead of the 'real' colors.\n"
-					"       -T [] (default off) No argument: Show color values and help for -T\n"
-					"       -u IP (default off) Connect to Ultimate64 at IP and command it to start streaming Video and Audio.\n"
-					"       -U IP (default off) Same as -u but don't stop the streaming when u64view exits.\n"
-					"       -I IP (default off) Just know the IP, do nothing, so keys can be used for starting/stopping stream.\n"
-					"       -o FN (default off) Output raw ARGB to FN.rgb and PCM to FN.pcm (20 MiB/s, you disk must keep up or packets are dropped).\n\n");
-					return 0;
-		} else if(strcmp(argv[i], "-z") == 0) {
-			if(i+1 < argc) {
-				i++;
-				scale=atoi(argv[i]);
-				if(scale==0) {
+	while ((c = getopt (argc, argv, "z:fsvVcmtT:u:U:I:o:")) != -1) {
+		switch(c) {
+			case 'z':
+				if (!strlen(optarg)) {
+					printf("Missing scale value\n");
+					return EXIT_FAILURE;
+				}
+				data->scale = atoi(optarg);
+				if (data->scale == 0) {
 					printf("Scale must be an integer larger than 0.\n");
-					return 1;
+					return EXIT_FAILURE;
 				}
-				printf("Scaling %i.\n", scale);
-			} else {
-				printf("Missing the scale number, see -h");
-				return 1;
-			}
-		} else if(strcmp(argv[i], "-f")==0) {
-			fullscreenFlag = SDL_WINDOW_FULLSCREEN_DESKTOP;
-			printf("Fullscreen is on.\n");
-		}  else if(strcmp(argv[i], "-s")==0) {
-			renderFlag = SDL_RENDERER_SOFTWARE;
-		}  else if(strcmp(argv[i], "-v")==0) {
-			vsyncFlag = SDL_RENDERER_PRESENTVSYNC;
-			printf("Vsync is on.\n");
-		} else if(strcmp(argv[i], "-V")==0) {
-			verbose=1;
-			printf("Verbose is on.\n");
-		} else if(strcmp(argv[i], "-c")==0) {
-			fast=0;
-		} else if(strcmp(argv[i], "-m")==0) {
-			audioFlag=0;
-			printf("Audio is off.\n");
-		} else if(strcmp(argv[i], "-t")==0) {
-			curColors = 1;
-			printf("Using DusteDs CRT colors.\n");
-		} else if(strcmp(argv[i], "-T") == 0) {
-			if(i+1 >= argc || argv[i+1][0] == '-') {
-				printf("User-defined color option (-T):\n\n    Default colors: ");
-				printColors(sred, sgreen, sblue);
-				printf("\n    DusteDs colors: ");
-				printColors(dred, dgreen, dblue);
-				printf("\n\n    If you want to use your own color values, just type them after -T in the format shown above (RGB24 in hex, like HTML, and comma between each color).\n"
-						"    The colors are, in order: black, white, red, cyan, purple, green, blue, yellow, orange, brown, pink, dark-grey, grey, light-green, light-blue, light-grey.\n"
-						"    Example: DusteDs colors, with a slightly darker blue: -T 060a0b,f2f1f1,b63c47,a2f7ed,af45d7,86f964,0030Ef,f8fe8a,d06e28,794e00,fb918f,5e6e69,a3b6ad,d1fcc5,6eb3ff,dce2db\n\n\n");
-				return 0;
-			} else {
-				i++;
-				char* ucol = argv[i];
-				printf("Using user-provided colors: ");
+				break;
+			case 'f':
+				data->fullscreenFlag = SDL_WINDOW_FULLSCREEN_DESKTOP;
+				printf("Fullscreen is on.\n");
+				break;
+			case 's':
+				data->renderFlag = SDL_RENDERER_SOFTWARE;
+				break;
+			case 'v':
+				data->vsyncFlag = SDL_RENDERER_PRESENTVSYNC;
+				printf("Vsync is on.\n");
+				break;
+			case 'V':
+				data->verbose=1;
+				printf("Verbose is on.\n");
+				break;
+			case 'c':
+				data->fast = 0;
+				break;
+			case 'm':
+				data->audioFlag=0;
+				printf("Audio is off.\n");
+				break;
+			case 't':
+				data->curColors = DCOLORS;
+				printf("Using DusteDs CRT colors.\n");
+				break;
+			case 'T':
+				if (!strlen(optarg)) {
+					printf("User-defined color option (-T):\n\n    Default colors: ");
+					printColors(sred, sgreen, sblue);
+					printf("\n    DusteDs colors: ");
+					printColors(dred, dgreen, dblue);
+					printf("\n\n    If you want to use your own color values, just type them after -T in the format shown above (RGB24 in hex, like HTML, and comma between each color).\n"
+							"    The colors are, in order: black, white, red, cyan, purple, green, blue, yellow, orange, brown, pink, dark-grey, grey, light-green, light-blue, light-grey.\n"
+							"    Example: DusteDs colors, with a slightly darker blue: -T 060a0b,f2f1f1,b63c47,a2f7ed,af45d7,86f964,0030Ef,f8fe8a,d06e28,794e00,fb918f,5e6e69,a3b6ad,d1fcc5,6eb3ff,dce2db\n\n\n");
+					return EXIT_FAILURE;
+				}
 				const int ucbytes = 16*6 + 15; // 16 6 byte values + the 15 commas between them
-				if(strlen(ucol) != ucbytes)
-				{
+				if (strlen(optarg) != ucbytes) {
 					printf("Error: Expected a string of exactly %i characters (see  -T without parameter to see examples)\n", ucbytes);
+					return EXIT_FAILURE;
 				}
-				int pos=0;
-				char colbyte[3] = {0,0,0 };
-				for(int i=0; i < 16; i++) {
-					colbyte[0] = ucol[pos];
-					pos++;
-					colbyte[1] = ucol[pos];
-					pos++;
-					ured[i] = strtol(colbyte, NULL, 16);
-
-					colbyte[0] = ucol[pos];
-					pos++;
-					colbyte[1] = ucol[pos];
-					pos++;
-					ugreen[i] = strtol(colbyte, NULL, 16);
-
-					colbyte[0] = ucol[pos];
-					pos++;
-					colbyte[1] = ucol[pos];
-					pos++;
-					ublue[i] = strtol(colbyte, NULL, 16);
-
-					pos++; // Skip character after 6 bytes
+				setUserColors(optarg);
+				data->curColors = UCOLORS;
+				break;
+			case 'o':
+				if (!strlen(optarg)) {
+					printf("Missing filename\n");
+					return EXIT_FAILURE;
 				}
-
-				curColors = 2;
-				printColors(ured, ugreen, ublue);
-				printf("\n");
-			}
-		} else if(strcmp(argv[i], "-o") == 0) {
-			if(i+1 < argc) {
-				i++;
-				verbose=1;
+				data->verbose=1;
 				printf("Turning on verbose mode, so you can see if you miss any data!\n");
-				printf("Outputting video to %s.rgb and audio to %s.pcm ...\n", argv[i], argv[i]);
+				printf("Outputting video to %s.rgb and audio to %s.pcm ...\n", optarg, optarg);
 				printf( "\nTry encoding with:\n"
 						"ffmpeg -vcodec rawvideo -pix_fmt abgr -s 384x272 -r 50\\\n"
 						"  -i %s.rgb -f s16le -ar 47983 -ac 2 -i %s.pcm\\\n"
 						"  -vf scale=w=1920:h=1080:force_original_aspect_ratio=decrease\\\n"
-						"  -sws_flags neighbor -crf 15 -vcodec libx264 %s.avi\n\n" ,argv[i],argv[i],argv[i]);
+						"  -sws_flags neighbor -crf 15 -vcodec libx264 %s.avi\n\n", optarg, optarg, optarg);
 
-				sprintf(fnbuf, "%s.rgb", argv[i]);
-				vfp=fopen(fnbuf,"w");
-				if(!vfp) {
-					printf("Error opening %s for writing.\n", fnbuf);
-					return 1;
+				sprintf(data->fnbuf, "%s.rgb", optarg);
+				data->vfp=fopen(data->fnbuf,"w");
+				if(!data->vfp) {
+					printf("Error opening %s for writing.\n", data->fnbuf);
+					return EXIT_FAILURE;
 				}
-				sprintf(fnbuf, "%s.pcm", argv[i]);
-				afp=fopen(fnbuf,"w");
-				if(!afp) {
-					printf("Error opening %s for writing.\n", fnbuf);
-					return 1;
+				sprintf(data->fnbuf, "%s.pcm", optarg);
+				data->afp=fopen(data->fnbuf,"w");
+				if(!data->afp) {
+					printf("Error opening %s for writing.\n", data->fnbuf);
+					fclose(data->vfp);
+					return EXIT_FAILURE;
 				}
-			} else {
-				printf("Missing filename.\n");
-				return 1;
-			}
-		} else if(strcmp(argv[i], "-u") == 0 || strcmp(argv[i], "-U") == 0 || strcmp(argv[i], "-I") == 0) {
-			if(strcmp(argv[i], "-U") == 0) {
-				stopStreamOnExit=0;
-			}
-			if(strcmp(argv[i], "-I") == 0) {
-				stopStreamOnExit=0;
-				startStreamOnStart=0;
-			}
-			if(i+1 < argc) {
-				i++;
-				hostName=argv[i];
-			} else {
-				printf("Missing IP address.\n");
-				return 1;
-			}
-			printf("Ultimate64 telnet interface at %s\n", hostName);
-		} else {
-			printf("Unknown option '%s', try -h\n", argv[i]);
-			return 1;
+				break;
+			case 'u':
+				if (!strlen(optarg)) {
+					printf("Error: missing IP address\n");
+					return EXIT_FAILURE;
+				}
+				strncpy(data->hostName, optarg, MAX_STRING_SIZE - 1);
+				break;
+			case 'U':
+				if (!strlen(optarg)) {
+					printf("Error: missing IP address\n");
+					return EXIT_FAILURE;
+				}
+				strncpy(data->hostName, optarg, MAX_STRING_SIZE - 1);
+				data->stopStreamOnExit=0;
+				break;
+			case 'I':
+				if (!strlen(optarg)) {
+					printf("Error: missing IP address\n");
+					return EXIT_FAILURE;
+				}
+				strncpy(data->hostName, optarg, MAX_STRING_SIZE - 1);
+				data->stopStreamOnExit=0;
+				data->startStreamOnStart=0;
+				break;
+			case 'h':
+				/* fall through */
+			default:
+				printHelp();
+				return EXIT_FAILURE;
 		}
 	}
 
+	return EXIT_SUCCESS;
+}
 
-	setColors(curColors);
+int setupStream(programData *data)
+{
+	setColors(data->curColors);
 
-	pkg = SDLNet_AllocPacket(sizeof(u64msg_t));
-	audpkg = SDLNet_AllocPacket(sizeof(a64msg_t));
+	data->pkg = SDLNet_AllocPacket(sizeof(u64msg_t));
+	data->audpkg = SDLNet_AllocPacket(sizeof(a64msg_t));
 
 	// Initialize SDL2
-	if (SDL_Init(SDL_INIT_VIDEO|audioFlag) != 0) {
+	if (SDL_Init(SDL_INIT_VIDEO|data->audioFlag) != 0) {
 		printf("SDL_Init Error: %s\n", SDL_GetError());
 		return 1;
 	}
@@ -423,89 +513,98 @@ int main(int argc, char** argv) {
 		return 2;
 	}
 
-	if(hostName && startStreamOnStart) {
-		startStream(hostName);
+	if(strlen(data->hostName) && data->startStreamOnStart) {
+		startStream(data->hostName);
 	}
 
-	set=SDLNet_AllocSocketSet(2);
-	if(!set) {
+	data->set=SDLNet_AllocSocketSet(2);
+	if(!data->set) {
 		printf("SDLNet_AllocSocketSet: %s\n", SDLNet_GetError());
 		return 4;
 	}
 
-	printf("Opening UDP socket on port %i for video...\n", listen);
-	udpsock=SDLNet_UDP_Open(listen);
-	if(!udpsock) {
+	printf("Opening UDP socket on port %i for video...\n", data->listen);
+	data->udpsock=SDLNet_UDP_Open(data->listen);
+	if(!data->udpsock) {
 		printf("SDLNet_UDP_Open: %s\n", SDLNet_GetError());
 		return 3;
 	}
 
-	if( SDLNet_UDP_AddSocket(set,udpsock) == -1 ) {
+	if( SDLNet_UDP_AddSocket(data->set, data->udpsock) == -1 ) {
 		printf("SDLNet_UDP_AddSocket error: %s\n", SDLNet_GetError());
 		return 5;
 	}
 
-	if(audioFlag) {
-		printf("Opening UDP socket on port %i for audio...\n", listenaudio);
-		audiosock=SDLNet_UDP_Open(listenaudio);
-		if(!audiosock) {
+	if(data->audioFlag) {
+		printf("Opening UDP socket on port %i for audio...\n", data->listenaudio);
+		data->audiosock=SDLNet_UDP_Open(data->listenaudio);
+		if(!data->audiosock) {
 			printf("SDLNet_UDP_Open: %s\n", SDLNet_GetError());
 			return 3;
 		}
 
-		if( SDLNet_UDP_AddSocket(set,audiosock) == -1 ) {
+		if( SDLNet_UDP_AddSocket(data->set, data->audiosock) == -1 ) {
 			printf("SDLNet_UDP_AddSocket error: %s\n", SDLNet_GetError());
 			return 5;
 		}
 
-		SDL_memset(&want, 0, sizeof(want));
-		want.freq = 48000;
-		want.format = AUDIO_S16LSB;
-		want.channels = 2;
-		want.samples = 192;
-		dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
+		SDL_memset(&data->want, 0, sizeof(data->want));
+		data->want.freq = 48000;
+		data->want.format = AUDIO_S16LSB;
+		data->want.channels = 2;
+		data->want.samples = 192;
+		data->dev = SDL_OpenAudioDevice(NULL, 0, &data->want, &data->have, 0);
 
-		if(dev==0) {
+		if(data->dev==0) {
 			printf("Failed to open audio: %s", SDL_GetError());
 		}
 
-		SDL_PauseAudioDevice(dev, 0);
+		SDL_PauseAudioDevice(data->dev, 0);
 	}
 
-
 	// Create a window
-	SDL_Window *win = SDL_CreateWindow("Ultimate 64 view!", 100, 100, width*scale, height*scale, SDL_WINDOW_SHOWN | fullscreenFlag | SDL_WINDOW_RESIZABLE);
-	if (win == NULL) {
+	data->win = SDL_CreateWindow("Ultimate 64 view!", 100, 100, data->width*data->scale,
+				data->height*data->scale, SDL_WINDOW_SHOWN | data->fullscreenFlag | SDL_WINDOW_RESIZABLE);
+	if (data->win == NULL) {
 		printf("SDL_CreateWindow Error: %s\n", SDL_GetError());
 		return 10;
 	}
 	// Set icon
 	SDL_Surface *iconSurface = SDL_CreateRGBSurfaceFrom(iconPixels,32,32,32,32*4, 0x000000ff, 0x0000ff00, 0x00ff0000, 0xff000000);
-	SDL_SetWindowIcon(win, iconSurface);
+	SDL_SetWindowIcon(data->win, iconSurface);
 	SDL_FreeSurface(iconSurface);
 
 	// Create a renderer
-	SDL_Renderer *ren = SDL_CreateRenderer(win, -1, (vsyncFlag | renderFlag));
-	if (ren == NULL) {
+	data->ren = SDL_CreateRenderer(data->win, -1, (data->vsyncFlag | data->renderFlag));
+	if (data->ren == NULL) {
 		printf("SDL_CreateRenderer Error: %s\n", SDL_GetError());
 		return 11;
 	}
 
-	SDL_Texture* tex = SDL_CreateTexture(ren,
-								SDL_PIXELFORMAT_RGBA8888,
-								SDL_TEXTUREACCESS_STREAMING,
-								width,
-								height);
+	data->tex = SDL_CreateTexture(data->ren,
+				SDL_PIXELFORMAT_RGBA8888,
+				SDL_TEXTUREACCESS_STREAMING,
+				data->width,
+				data->height);
 
-	if( SDL_LockTexture(tex, NULL, (void**)&pixels, &pitch) ) {
+	if( SDL_LockTexture(data->tex, NULL, (void**)&data->pixels, &data->pitch) ) {
 		printf("Failed to lock texture for writing");
 	}
 
-	printf("\nRunning...\nPress ESC or close window to stop.\n\n");
+	return 0;
+}
 
-	pic(tex, width, height, pitch, pixels);
+void runStream(programData *data)
+{
+	SDL_Event event;
+	int run = 1;
+	int sync = 1;
 	int staleVideo=7;
-	int r;
+	int r = 0;
+	uint16_t lastAseq=0;
+	uint16_t lastVseq=0;
+
+	pic(data->tex, data->width, data->height, data->pitch, data->pixels);
 	while (run) {
 		while (SDL_PollEvent(&event)) {
 			switch (event.type) {
@@ -515,36 +614,36 @@ int main(int argc, char** argv) {
 					run = 0;
 				break;
 				case SDLK_c:
-					showHelp=0;
-					curColors++;
-					if(curColors==3) {
-						curColors=0;
+					data->showHelp=0;
+					data->curColors++;
+					if(data->curColors == NUM_OF_COLORSCHEMES) {
+						data->curColors=SCOLORS;
 					}
-					setColors(curColors);
+					setColors(data->curColors);
 				break;
 				case SDLK_s:
-					showHelp=0;
-					if(!hostName) {
+					data->showHelp=0;
+					if(!strlen(data->hostName)) {
 						printf("Can only start/stop stream when started with -u, -U or -I.\n");
 					} else {
 						if(isStreaming) {
-							stopStream(hostName);
+							stopStream(data->hostName);
 						} else {
-							startStream(hostName);
+							startStream(data->hostName);
 						}
 					}
 				break;
 				case SDLK_h:
-					showHelp=!showHelp;
+					data->showHelp=!data->showHelp;
 				break;
 				case SDLK_p:
-					stopStreamOnExit=0;
-					powerOff(hostName);
-					hostName=0;
+					data->stopStreamOnExit=0;
+					powerOff(data->hostName);
+					memset(data->hostName, 0, sizeof data->hostName);
 				break;
 				case SDLK_r:
-					if(hostName) {
-						reset(hostName);
+					if(strlen(data->hostName)) {
+						reset(data->hostName);
 					} else {
 						printf("Can only reset when start with -u, -U or -I.\n");
 					}
@@ -557,49 +656,52 @@ int main(int argc, char** argv) {
 		}
 
 		// Check for audio
-		if(audioFlag) {
-			r = SDLNet_UDP_Recv(audiosock, audpkg);
+		if(data->audioFlag) {
+			r = SDLNet_UDP_Recv(data->audiosock, data->audpkg);
 			if(r==1) {
 
 				if(totalAdataBytes==0) {
-					printf("Got data on audio port (%i) from %s:%i\n", listenaudio, intToIp(audpkg->address.host),audpkg->address.port );
+					printf("Got data on audio port (%i) from %s:%i\n", data->listenaudio,
+						intToIp(data->audpkg->address.host), data->audpkg->address.port );
 				}
 				totalAdataBytes += sizeof(a64msg_t);
 
-				a64msg_t *a = (a64msg_t*)audpkg->data;
-				if(verbose) chkSeq("UDP audio packet missed or out of order, last received: %i current %i\n", &lastAseq, a->seq);
+				a64msg_t *a = (a64msg_t*)data->audpkg->data;
+				if(data->verbose)
+					chkSeq("UDP audio packet missed or out of order, last received: %i current %i\n", &lastAseq, a->seq);
 
-				if(afp && totalVdataBytes != 0 && totalAdataBytes != 0) {
-					fwrite(a->sample, 192*4, 1, afp);
+				if(data->afp && totalVdataBytes != 0 && totalAdataBytes != 0) {
+					fwrite(a->sample, SAMPLE_SIZE, 1, data->afp);
 				}
 
-				SDL_QueueAudio(dev, a->sample, 192*4 );
+				SDL_QueueAudio(data->dev, a->sample, SAMPLE_SIZE );
 			} else if(r == -1) {
 				printf("SDLNet_UDP_Recv error: %s\n", SDLNet_GetError());
 			}
 		}
 
 		// Check for video
-		r = SDLNet_UDP_Recv(udpsock, pkg);
-		if(r==1 && !showHelp) {
-
+		r = SDLNet_UDP_Recv(data->udpsock, data->pkg);
+		if(r==1 && !data->showHelp) {
 			if(totalVdataBytes==0) {
-				printf("Got data on video port (%i) from %s:%i\n", listen, intToIp(pkg->address.host),pkg->address.port );
+				printf("Got data on video port (%i) from %s:%i\n", data->listen,
+				       intToIp(data->pkg->address.host), data->pkg->address.port );
 			}
 			totalVdataBytes += sizeof(u64msg_t);
 
-			u64msg_t *p = (u64msg_t*)pkg->data;
-			if(verbose) chkSeq("UDP video packet missed or out of order, last received: %i current %i\n", &lastVseq, p->seq);
+			u64msg_t *p = (u64msg_t*)data->pkg->data;
+			if(data->verbose)
+				chkSeq("UDP video packet missed or out of order, last received: %i current %i\n", &lastVseq, p->seq);
 
 			int y = p->line & 0b0111111111111111;
-			if(fast) {
+			if(data->fast) {
 				int lpp = p->linexInPacket;
 				int hppl =p->pixelsInLine/2;
 				for(int l=0; l < lpp; l++) {
 					for(int x=0; x < hppl; x++) {
 						int idx = x+(l*hppl);
 						uint8_t pc = (p->payload[idx]);
-						((uint64_t*)pixels)[x + ((y+l)*pitch/8)] = pixMap[pc];
+						((uint64_t*)data->pixels)[x + ((y+l)*data->pitch/8)] = pixMap[pc];
 					}
 				}
 			} else {
@@ -612,13 +714,13 @@ int main(int argc, char** argv) {
 						int g = green[pl];
 						int b = blue[pl];
 
-						SDL_SetRenderDrawColor(ren, r, g, b, 255);
-						SDL_RenderDrawPoint(ren, x*2, y+l);
+						SDL_SetRenderDrawColor(data->ren, r, g, b, 255);
+						SDL_RenderDrawPoint(data->ren, x*2, y+l);
 						r = red[ph];
 						g = green[ph];
 						b = blue[ph];
-						SDL_SetRenderDrawColor(ren, r, g, b, 255);
-						SDL_RenderDrawPoint(ren, x*2+1, y+l);
+						SDL_SetRenderDrawColor(data->ren, r, g, b, 255);
+						SDL_RenderDrawPoint(data->ren, x*2+1, y+l);
 					}
 				}
 			}
@@ -632,7 +734,7 @@ int main(int argc, char** argv) {
 			staleVideo++;
 			if(staleVideo > 5) {
 				if(staleVideo == 6) {
-					pic(tex, width, height, pitch, pixels);
+					pic(data->tex, data->width, data->height, data->pitch, data->pixels);
 				} else if(staleVideo%10 == 0) {
 					sync=1;
 				}
@@ -641,44 +743,88 @@ int main(int argc, char** argv) {
 
 		if(sync) {
 			sync=0;
-			if(fast) {
-				if(vfp && totalVdataBytes != 0 && totalAdataBytes != 0) {
-					fwrite(pixels, sizeof(uint32_t)*width*height, 1, vfp);
+			if(data->fast) {
+				if(data->vfp && totalVdataBytes != 0 && totalAdataBytes != 0) {
+					fwrite(data->pixels, sizeof(uint32_t)*data->width*data->height, 1, data->vfp);
 				}
-				SDL_UnlockTexture(tex);
-				SDL_RenderCopy(ren, tex, NULL, NULL);
-				SDL_RenderPresent(ren);
-				if( SDL_LockTexture(tex, NULL, (void**)&pixels, &pitch) ) {
+				SDL_UnlockTexture(data->tex);
+				SDL_RenderCopy(data->ren, data->tex, NULL, NULL);
+				SDL_RenderPresent(data->ren);
+				if( SDL_LockTexture(data->tex, NULL, (void**)data->pixels, &data->pitch) ) {
 					printf("Error: Failed to lock texture for writing.");
 				}
 			} else {
-				SDL_RenderPresent(ren);
+				SDL_RenderPresent(data->ren);
 			}
 		}
-		SDLNet_CheckSockets(set, 200);
+		SDLNet_CheckSockets(data->set, 200);
 	}
 
-	if(hostName && stopStreamOnExit) {
-		stopStream(hostName);
+	if(strlen(data->hostName) && data->stopStreamOnExit) {
+		stopStream(data->hostName);
 	}
 
-	SDL_DestroyTexture(tex);
-	if(audioFlag) {
-		SDL_CloseAudioDevice(dev);
+	SDL_DestroyTexture(data->tex);
+	if(data->audioFlag) {
+		SDL_CloseAudioDevice(data->dev);
 	}
 
 	// The logic being that if opening either went south, we already exited.
-	if(vfp) {
-		fclose(vfp);
-		fclose(afp);
+	if(data->vfp) {
+		fclose(data->vfp);
+		fclose(data->afp);
 	}
-	SDL_DestroyRenderer(ren);
-	SDL_DestroyWindow(win);
-	SDL_Quit();
 
-	if(verbose) {
+	if (data->pkg) {
+		SDLNet_FreePacket(data->pkg);
+	}
+
+	if (data->audpkg) {
+		SDLNet_FreePacket(data->audpkg);
+	}
+
+	if (data->set) {
+		SDLNet_FreeSocketSet(data->set);
+	}
+
+	if (data->udpsock) {
+		SDLNet_UDP_Close(data->udpsock);
+	}
+
+	if (data->audiosock) {
+		SDLNet_UDP_Close(data->audiosock);
+	}
+
+	SDL_DestroyRenderer(data->ren);
+	SDL_DestroyWindow(data->win);
+	SDL_Quit();
+}
+
+int main(int argc, char** argv)
+{
+	programData data;
+
+	setDefaults(&data);
+	printf("\nUltimate 64 view!\n-----------------\n  Try -h for options.\n\n");
+
+	if (parseArgument(argc, argv, &data) == EXIT_FAILURE) {
+		return EXIT_FAILURE;
+	}
+
+	printf("Ultimate64 telnet interface at %s\n", data.hostName);
+
+	if (setupStream(&data) != 0) {
+		return EXIT_FAILURE;
+	}
+
+	printf("\nRunning...\nPress ESC or close window to stop.\n\n");
+	runStream(&data);
+
+	if(data.verbose) {
 		printf("\nReceived video data: %"PRIu64" bytes.\nReceived audio data: %"PRIu64" bytes.\n", totalVdataBytes, totalAdataBytes);
 	}
+
 	printf("\n\nThanks to Jens Blidon and Markus Schneider for making my favourite tunes!\nThanks to Booze for making the best remix of Chicanes Halcyon and such beautiful visuals to go along with it!\nThanks to Gideons Logic for the U64!\n\n                                    - DusteD says hi! :-)\n\n");
-	return 0;
+
+	return EXIT_SUCCESS;
 }
