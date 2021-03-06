@@ -25,6 +25,11 @@
 #define SDLNET_TIMEOUT 30
 #define SDLNET_STREAM_TIMEOUT 200
 #define USER_COLORS 16*6 + 15 // 16 6 byte values + the 15 commas between them
+#define PIXMAP_SIZE 0x100
+#define COMMAND_DELAY 10
+#define AUDIO_FREQUENCY 48000
+#define AUDIO_CHANNELS 2
+#define AUDIO_SAMPLES 192
 
 typedef struct __attribute__((__packed__)) {
 	uint16_t seq;
@@ -127,8 +132,11 @@ uint64_t ured[] =   { 10,255,30,40,50,60,70,80,90,0xa0,0xb0,0xc0,0xd0,0xc0,0xd0,
 uint64_t ugreen[] = { 10,255,30,40,50,60,70,80,90,0xa0,0xb0,0xc0,0xd0,0xc0,0xd0,0xe0 };
 uint64_t ublue[] =  { 10,255,30,40,50,60,70,80,90,0xa0,0xb0,0xc0,0xd0,0xc0,0xd0,0xe0 };
 
-const uint64_t *red = sred, *green =sgreen, *blue=sblue;
-uint64_t pixMap[0x100];
+const uint64_t *red = sred;
+const uint64_t *green = sgreen;
+const uint64_t *blue = sblue;
+
+uint64_t pixMap[PIXMAP_SIZE];
 
 void setColors(colorScheme colors)
 {
@@ -143,8 +151,8 @@ void setColors(colorScheme colors)
 			green = ugreen;
 			blue = ublue;
 			break;
-		/* fall through */
 		case SCOLORS:
+		/* fall through */
 		default:
 			red = sred;
 			green = sgreen;
@@ -154,7 +162,7 @@ void setColors(colorScheme colors)
 
 	// Build a table with colors for two pixels packed into a byte.
 	// Then if we treat the framebuffer as an uint64 array we get to write two pixels in by doing one read and one write
-	for(int i=0; i<0x100; i++) {
+	for(int i=0; i<PIXMAP_SIZE; i++) {
 		int ph = (i & 0xf0) >> 4;
 		int pl = i & 0x0f;
 		pixMap[i] = red[ph] << (64-8) | green[ph]<< (64-16) | blue[ph] << (64-24) | (uint64_t)0xff << (64-32) | red[pl] << (32-8) | green[pl] << (32-16) | blue[pl] << (32-24) | 0xff;
@@ -214,7 +222,7 @@ void sendSequence(char *hostName, const uint8_t *data, int len)
 
 	SDLNet_TCP_AddSocket(set, sock);
 
-	SDL_Delay(10);
+	SDL_Delay(COMMAND_DELAY);
 	for(int i=0; i < len; i++) {
 		SDL_Delay(1);
 		if(SDLNet_TCP_Send(sock, &data[i], 1) <1 ) {
@@ -514,7 +522,10 @@ int parseArguments(int argc, char **argv, programData *data)
 							"    The colors are, in order: black, white, red, cyan, purple, green, blue, yellow, orange, brown, pink, dark-grey, grey, light-green, light-blue, light-grey.\n"
 							"    Example: DusteDs colors, with a slightly darker blue: -T 060a0b,f2f1f1,b63c47,a2f7ed,af45d7,86f964,0030Ef,f8fe8a,d06e28,794e00,fb918f,5e6e69,a3b6ad,d1fcc5,6eb3ff,dce2db\n\n\n");
 					return EXIT_FAILURE;
+				} else {
+					printf("Invalid argument '-%c'\n", optopt);
 				}
+				return EXIT_FAILURE;
 			case 'h':
 				/* fall through */
 			default:
@@ -528,20 +539,24 @@ int parseArguments(int argc, char **argv, programData *data)
 
 int setupStream(programData *data)
 {
+	int sdl_init = 0;
+	int sdl_net_init = 0;
 	setColors(data->curColors);
 
 	data->pkg = SDLNet_AllocPacket(sizeof(u64msg_t));
 	data->audpkg = SDLNet_AllocPacket(sizeof(a64msg_t));
 
 	// Initialize SDL2
-	if (SDL_Init(SDL_INIT_VIDEO|data->audioFlag) != 0) {
+	sdl_init = SDL_Init(SDL_INIT_VIDEO|data->audioFlag);
+	if (sdl_init != 0) {
 		printf("SDL_Init Error: %s\n", SDL_GetError());
-		return 1;
+		goto clean_up;
 	}
 
-	if(SDLNet_Init()==-1) {
+	sdl_net_init = SDLNet_Init();
+	if(sdl_net_init == -1) {
 		printf("SDLNet_Init: %s\n", SDLNet_GetError());
-		return 2;
+		goto clean_up;
 	}
 
 	if(strlen(data->hostName) && data->startStreamOnStart) {
@@ -551,19 +566,19 @@ int setupStream(programData *data)
 	data->set=SDLNet_AllocSocketSet(2);
 	if(!data->set) {
 		printf("SDLNet_AllocSocketSet: %s\n", SDLNet_GetError());
-		return 4;
+		goto clean_up;
 	}
 
 	printf("Opening UDP socket on port %i for video...\n", data->listen);
 	data->udpsock=SDLNet_UDP_Open(data->listen);
 	if(!data->udpsock) {
 		printf("SDLNet_UDP_Open: %s\n", SDLNet_GetError());
-		return 3;
+		goto clean_up;
 	}
 
 	if( SDLNet_UDP_AddSocket(data->set, data->udpsock) == -1 ) {
 		printf("SDLNet_UDP_AddSocket error: %s\n", SDLNet_GetError());
-		return 5;
+		goto clean_up;
 	}
 
 	if(data->audioFlag) {
@@ -571,19 +586,19 @@ int setupStream(programData *data)
 		data->audiosock=SDLNet_UDP_Open(data->listenaudio);
 		if(!data->audiosock) {
 			printf("SDLNet_UDP_Open: %s\n", SDLNet_GetError());
-			return 3;
+			goto clean_up;
 		}
 
 		if( SDLNet_UDP_AddSocket(data->set, data->audiosock) == -1 ) {
 			printf("SDLNet_UDP_AddSocket error: %s\n", SDLNet_GetError());
-			return 5;
+			goto clean_up;
 		}
 
 		SDL_memset(&data->want, 0, sizeof(data->want));
-		data->want.freq = 48000;
+		data->want.freq = AUDIO_FREQUENCY;
 		data->want.format = AUDIO_S16LSB;
-		data->want.channels = 2;
-		data->want.samples = 192;
+		data->want.channels = AUDIO_CHANNELS;
+		data->want.samples = AUDIO_SAMPLES;
 		data->dev = SDL_OpenAudioDevice(NULL, 0, &data->want, &data->have, 0);
 
 		if(data->dev==0) {
@@ -598,7 +613,7 @@ int setupStream(programData *data)
 				data->height*data->scale, SDL_WINDOW_SHOWN | data->fullscreenFlag | SDL_WINDOW_RESIZABLE);
 	if (data->win == NULL) {
 		printf("SDL_CreateWindow Error: %s\n", SDL_GetError());
-		return 10;
+		goto clean_up;
 	}
 	// Set icon
 	SDL_Surface *iconSurface = SDL_CreateRGBSurfaceFrom(iconPixels,32,32,32,32*4, 0x000000ff, 0x0000ff00, 0x00ff0000, 0xff000000);
@@ -609,7 +624,7 @@ int setupStream(programData *data)
 	data->ren = SDL_CreateRenderer(data->win, -1, (data->vsyncFlag | data->renderFlag));
 	if (data->ren == NULL) {
 		printf("SDL_CreateRenderer Error: %s\n", SDL_GetError());
-		return 11;
+		goto clean_up;
 	}
 
 	data->tex = SDL_CreateTexture(data->ren,
@@ -622,7 +637,41 @@ int setupStream(programData *data)
 		printf("Failed to lock texture for writing");
 	}
 
-	return 0;
+	return EXIT_SUCCESS;
+
+clean_up:
+	if (data->pkg) {
+		SDLNet_FreePacket(data->pkg);
+	}
+	if (data->audpkg) {
+		SDLNet_FreePacket(data->audpkg);
+	}
+	if (data->set) {
+		SDLNet_FreeSocketSet(data->set);
+	}
+	if (data->udpsock) {
+		SDLNet_UDP_Close(data->udpsock);
+	}
+	if (data->audiosock) {
+		SDLNet_UDP_Close(data->audiosock);
+	}
+	if (data->tex) {
+		SDL_DestroyTexture(data->tex);
+	}
+	if (data->ren) {
+		SDL_DestroyRenderer(data->ren);
+	}
+	if (data->win) {
+		SDL_DestroyWindow(data->win);
+	}
+	if (sdl_net_init) {
+		SDLNet_Quit();
+	}
+	if (sdl_init) {
+		SDL_Quit();
+	}
+
+	return EXIT_FAILURE;
 }
 
 void runStream(programData *data)
@@ -698,8 +747,9 @@ void runStream(programData *data)
 				totalAdataBytes += sizeof(a64msg_t);
 
 				a64msg_t *a = (a64msg_t*)data->audpkg->data;
-				if(data->verbose)
+				if(data->verbose) {
 					chkSeq("UDP audio packet missed or out of order, last received: %i current %i\n", &lastAseq, a->seq);
+				}
 
 				if(data->afp && totalVdataBytes != 0 && totalAdataBytes != 0) {
 					fwrite(a->sample, SAMPLE_SIZE, 1, data->afp);
@@ -721,8 +771,9 @@ void runStream(programData *data)
 			totalVdataBytes += sizeof(u64msg_t);
 
 			u64msg_t *p = (u64msg_t*)data->pkg->data;
-			if(data->verbose)
+			if(data->verbose) {
 				chkSeq("UDP video packet missed or out of order, last received: %i current %i\n", &lastVseq, p->seq);
+			}
 
 			int y = p->line & 0b0111111111111111;
 			if(data->fast) {
@@ -828,6 +879,7 @@ void runStream(programData *data)
 
 	SDL_DestroyRenderer(data->ren);
 	SDL_DestroyWindow(data->win);
+	SDLNet_Quit();
 	SDL_Quit();
 }
 
@@ -844,7 +896,7 @@ int main(int argc, char** argv)
 
 	printf("Ultimate64 telnet interface at %s\n", data.hostName);
 
-	if (setupStream(&data) != 0) {
+	if (setupStream(&data) == EXIT_FAILURE) {
 		return EXIT_FAILURE;
 	}
 
