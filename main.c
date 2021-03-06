@@ -322,20 +322,22 @@ void printColors(const uint64_t *red, const uint64_t *green, const uint64_t *blu
 
 void printHelp(void)
 {
-	printf("\nUsage: u64view [-z N |-f] [-s] [-v] [-V] [-c] [-m] [-t] [-T [RGB,...]] [-u IP | -U IP -I IP] [-o FN]\n"
-			"       -z N  (default 1)   Scale the window to N times size, N must be an integer.\n"
-			"       -f    (default off) Fullscreen, will stretch.\n"
-			"       -s    (default off) Prefer software rendering, more cpu intensive.\n"
-			"       -v    (default off) Use vsync.\n"
-			"       -V    (default off) Verbose output, tell when packets are dropped, how much data was transferred.\n"
-			"       -c    (default off) Use more versatile drawing method, more cpu intensive, can't scale.\n"
-			"       -m    (default off) Completely turn off audio.\n"
-			"       -t    (default off) Use colors that look more like DusteDs TV instead of the 'real' colors.\n"
-			"       -T [] (default off) No argument: Show color values and help for -T\n"
-			"       -u IP (default off) Connect to Ultimate64 at IP and command it to start streaming Video and Audio.\n"
-			"       -U IP (default off) Same as -u but don't stop the streaming when u64view exits.\n"
-			"       -I IP (default off) Just know the IP, do nothing, so keys can be used for starting/stopping stream.\n"
-			"       -o FN (default off) Output raw ARGB to FN.rgb and PCM to FN.pcm (20 MiB/s, you disk must keep up or packets are dropped).\n\n");
+	printf("\nUsage: u64view [-l N] [-a N] [-z N |-f] [-s] [-v] [-V] [-c] [-m] [-t] [-T [RGB,...]] [-u IP | -U IP -I IP] [-o FN]\n"
+			"       -l N  (default 11000) Video port number.\n"
+			"       -a N  (default 11001) Audio port number.\n"
+			"       -z N  (default 1)     Scale the window to N times size, N must be an integer.\n"
+			"       -f    (default off)   Fullscreen, will stretch.\n"
+			"       -s    (default off)   Prefer software rendering, more cpu intensive.\n"
+			"       -v    (default off)   Use vsync.\n"
+			"       -V    (default off)   Verbose output, tell when packets are dropped, how much data was transferred.\n"
+			"       -c    (default off)   Use more versatile drawing method, more cpu intensive, can't scale.\n"
+			"       -m    (default off)   Completely turn off audio.\n"
+			"       -t    (default off)   Use colors that look more like DusteDs TV instead of the 'real' colors.\n"
+			"       -T [] (default off)   No argument: Show color values and help for -T\n"
+			"       -u IP (default off)   Connect to Ultimate64 at IP and command it to start streaming Video and Audio.\n"
+			"       -U IP (default off)   Same as -u but don't stop the streaming when u64view exits.\n"
+			"       -I IP (default off)   Just know the IP, do nothing, so keys can be used for starting/stopping stream.\n"
+			"       -o FN (default off)   Output raw ARGB to FN.rgb and PCM to FN.pcm (20 MiB/s, you disk must keep up or packets are dropped).\n\n");
 }
 
 void setUserColors(char *ucol)
@@ -369,13 +371,35 @@ void setUserColors(char *ucol)
 	printf("\n");
 }
 
-int parseArgument(int argc, char **argv, programData *data)
+int parseArguments(int argc, char **argv, programData *data)
 {
 	opterr = 0;
 	int c;
 
-	while ((c = getopt (argc, argv, "z:fsvVcmtT:u:U:I:o:")) != -1) {
+	while ((c = getopt (argc, argv, "l:a:z:fsvVcmtT:u:U:I:o:")) != -1) {
 		switch(c) {
+			case 'l':
+				if (!strlen(optarg)) {
+					printf("Missing video port number\n");
+					return EXIT_FAILURE;
+				}
+				data->listen = atoi(optarg);
+				if (data->listen == 0) {
+					printf("Video port must be an integer larger than 0.\n");
+					return EXIT_FAILURE;
+				}
+				break;
+			case 'a':
+				if (!strlen(optarg)) {
+					printf("Missing audio port number\n");
+					return EXIT_FAILURE;
+				}
+				data->listenaudio = atoi(optarg);
+				if (data->listenaudio == 0) {
+					printf("Audio port must be an integer larger than 0.\n");
+					return EXIT_FAILURE;
+				}
+				break;
 			case 'z':
 				if (!strlen(optarg)) {
 					printf("Missing scale value\n");
@@ -807,7 +831,7 @@ int main(int argc, char** argv)
 	setDefaults(&data);
 	printf("\nUltimate 64 view!\n-----------------\n  Try -h for options.\n\n");
 
-	if (parseArgument(argc, argv, &data) == EXIT_FAILURE) {
+	if (parseArguments(argc, argv, &data) == EXIT_FAILURE) {
 		return EXIT_FAILURE;
 	}
 
