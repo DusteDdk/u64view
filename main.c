@@ -415,7 +415,7 @@ int parseArguments(int argc, char **argv, programData *data)
 	opterr = 0;
 	int c;
 
-	while ((c = getopt (argc, argv, "l:a:z:fsvVcmtT:u:U:I:o:")) != -1) {
+	while ((c = getopt (argc, argv, "hl:a:z:fsvVcmtT:u:U:I:o:")) != -1) {
 		switch(c) {
 			case 'l':
 				data->listen = atoi(optarg);
@@ -527,7 +527,7 @@ int parseArguments(int argc, char **argv, programData *data)
 				}
 				return EXIT_FAILURE;
 			case 'h':
-				/* fall through */
+			/* fall through */
 			default:
 				printHelp();
 				return EXIT_FAILURE;
