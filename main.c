@@ -14,6 +14,19 @@
 
 //#define DEBUG
 
+// "Ok ok, use them then..."
+#define SOCKET_CMD_DMA         0xFF01
+#define SOCKET_CMD_DMARUN      0xFF02
+#define SOCKET_CMD_KEYB        0xFF03
+#define SOCKET_CMD_RESET       0xFF04
+#define SOCKET_CMD_WAIT        0xFF05
+#define SOCKET_CMD_DMAWRITE    0xFF06
+#define SOCKET_CMD_REUWRITE    0xFF07
+#define SOCKET_CMD_KERNALWRITE 0xFF08
+#define SOCKET_CMD_DMAJUMP     0xFF09
+#define SOCKET_CMD_MOUNT_IMG   0xFF0A
+#define SOCKET_CMD_RUN_IMG     0xFF0B
+
 // Only available on U64
 #define SOCKET_CMD_VICSTREAM_ON    0xFF20
 #define SOCKET_CMD_AUDIOSTREAM_ON  0xFF21
@@ -379,15 +392,13 @@ int powerOff(char* hostName)
 int reset(char* hostName)
 {
 	int result;
-	const uint8_t data[] = {
-		0x1b, 0x5b, 0x31, 0x35, 0x7e, // f5
-		0x1b, 0x5b, 0x42, // Arrow down
-		0xd, 0x00,
-		0xd, 0x00, //enter
+	const uint16_t data[] = {
+		SOCKET_CMD_RESET,
+		0x0000
 	};
 
 	printf("Sending reset sequence to Ultimate64...\n");
-	result = sendSequence(hostName, data, sizeof(data));
+	result = sendCommand(hostName, data, sizeof(data));
 	if (result != EXIT_SUCCESS) {
 		return result;
 	}
