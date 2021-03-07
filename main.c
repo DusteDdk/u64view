@@ -118,6 +118,10 @@ typedef struct {
 	SDL_Texture *tex;
 	uint32_t *pixels;
 	int pitch;
+	int isStreaming;
+	uint64_t totalVdataBytes;
+	uint64_t totalAdataBytes;
+	uint64_t pixMap[PIXMAP_SIZE];
 } programData;
 
 // I found the colors here: https://gist.github.com/funkatron/758033
@@ -138,12 +142,6 @@ uint64_t ublue[] =  { 10,255,30,40,50,60,70,80,90,0xa0,0xb0,0xc0,0xd0,0xc0,0xd0,
 const uint64_t *red = sred;
 const uint64_t *green = sgreen;
 const uint64_t *blue = sblue;
-
-uint64_t pixMap[PIXMAP_SIZE];
-
-uint64_t totalVdataBytes=0;
-uint64_t totalAdataBytes=0;
-int isStreaming=0;
 
 char ipStr[IP_ADDR_SIZE];
 
@@ -169,9 +167,9 @@ char* intToIp(uint32_t ip)
 	return ipStr;
 }
 
-void setColors(colorScheme colors)
+void setColors(programData *data)
 {
-	switch(colors) {
+	switch(data->curColors) {
 		case DCOLORS:
 			red = dred;
 			green = dgreen;
@@ -196,13 +194,13 @@ void setColors(colorScheme colors)
 	for(int i=0; i<PIXMAP_SIZE; i++) {
 		int ph = (i & 0xf0) >> 4;
 		int pl = i & 0x0f;
-		pixMap[i] = red[ph] << (64-8) | green[ph]<< (64-16) | blue[ph] << (64-24) | (uint64_t)0xff << (64-32) | red[pl] << (32-8) | green[pl] << (32-16) | blue[pl] << (32-24) | 0xff;
+		data->pixMap[i] = red[ph] << (64-8) | green[ph]<< (64-16) | blue[ph] << (64-24) | (uint64_t)0xff << (64-32) | red[pl] << (32-8) | green[pl] << (32-16) | blue[pl] << (32-24) | 0xff;
 	}
 }
 
-void chkSeq(const char* msg, uint16_t *lseq, uint16_t cseq)
+void chkSeq(programData *data, const char* msg, uint16_t *lseq, uint16_t cseq)
 {
-	if((uint16_t)(*lseq+1) != cseq && (totalAdataBytes>1024*10 && totalVdataBytes > 1024*1024) ) {
+	if((uint16_t)(*lseq+1) != cseq && (data->totalAdataBytes>1024*10 && data->totalVdataBytes > 1024*1024) ) {
 		printf(msg, *lseq, cseq);
 	}
 	*lseq=cseq;
@@ -359,7 +357,7 @@ int runCommand(programData *prgData, command cmd)
 			if (result != EXIT_SUCCESS) {
 				return result;
 			}
-			isStreaming=1;
+			prgData->isStreaming=1;
 			break;
 		case CMD_STOP_STREAM:
 			printf("Sending stop stream command to Ultimate64...\n");
@@ -367,7 +365,7 @@ int runCommand(programData *prgData, command cmd)
 			if (result != EXIT_SUCCESS) {
 				return result;
 			}
-			isStreaming=0;
+			prgData->isStreaming=0;
 			break;
 		case CMD_RESET:
 			printf("Sending reset command to Ultimate64...\n");
@@ -375,7 +373,7 @@ int runCommand(programData *prgData, command cmd)
 			if (result != EXIT_SUCCESS) {
 				return result;
 			}
-			isStreaming=0;
+			prgData->isStreaming=0;
 			break;
 		default:
 			return EXIT_FAILURE;
@@ -403,7 +401,7 @@ int powerOff(programData *prgData)
 		return result;
 	}
 	printf("  * done.\n");
-	isStreaming=0;
+	prgData->isStreaming=0;
 
 	return EXIT_SUCCESS;
 }
@@ -598,7 +596,7 @@ int setupStream(programData *data)
 {
 	int sdl_init = 0;
 	int sdl_net_init = 0;
-	setColors(data->curColors);
+	setColors(data);
 
 	data->pkg = SDLNet_AllocPacket(sizeof(u64msg_t));
 	data->audpkg = SDLNet_AllocPacket(sizeof(a64msg_t));
@@ -758,14 +756,14 @@ void runStream(programData *data)
 					if(data->curColors == NUM_OF_COLORSCHEMES) {
 						data->curColors=SCOLORS;
 					}
-					setColors(data->curColors);
+					setColors(data);
 				break;
 				case SDLK_s:
 					data->showHelp=0;
 					if(!strlen(data->hostName)) {
 						printf("Can only start/stop stream when started with -u, -U or -I.\n");
 					} else {
-						if(isStreaming) {
+						if(data->isStreaming) {
 							if (runCommand(data, CMD_STOP_STREAM) != EXIT_SUCCESS) {
 								run = 0;
 							}
@@ -807,18 +805,18 @@ void runStream(programData *data)
 			r = SDLNet_UDP_Recv(data->audiosock, data->audpkg);
 			if(r==1) {
 
-				if(totalAdataBytes==0) {
+				if(data->totalAdataBytes==0) {
 					printf("Got data on audio port (%i) from %s:%i\n", data->listenaudio,
 						intToIp(data->audpkg->address.host), data->audpkg->address.port );
 				}
-				totalAdataBytes += sizeof(a64msg_t);
+				data->totalAdataBytes += sizeof(a64msg_t);
 
 				a64msg_t *a = (a64msg_t*)data->audpkg->data;
 				if(data->verbose) {
-					chkSeq("UDP audio packet missed or out of order, last received: %i current %i\n", &lastAseq, a->seq);
+					chkSeq(data, "UDP audio packet missed or out of order, last received: %i current %i\n", &lastAseq, a->seq);
 				}
 
-				if(data->afp && totalVdataBytes != 0 && totalAdataBytes != 0) {
+				if(data->afp && data->totalVdataBytes != 0 && data->totalAdataBytes != 0) {
 					fwrite(a->sample, SAMPLE_SIZE, 1, data->afp);
 				}
 
@@ -831,15 +829,15 @@ void runStream(programData *data)
 		// Check for video
 		r = SDLNet_UDP_Recv(data->udpsock, data->pkg);
 		if(r==1 && !data->showHelp) {
-			if(totalVdataBytes==0) {
+			if(data->totalVdataBytes==0) {
 				printf("Got data on video port (%i) from %s:%i\n", data->listen,
 				       intToIp(data->pkg->address.host), data->pkg->address.port );
 			}
-			totalVdataBytes += sizeof(u64msg_t);
+			data->totalVdataBytes += sizeof(u64msg_t);
 
 			u64msg_t *p = (u64msg_t*)data->pkg->data;
 			if(data->verbose) {
-				chkSeq("UDP video packet missed or out of order, last received: %i current %i\n", &lastVseq, p->seq);
+				chkSeq(data, "UDP video packet missed or out of order, last received: %i current %i\n", &lastVseq, p->seq);
 			}
 
 			int y = p->line & 0b0111111111111111;
@@ -850,7 +848,7 @@ void runStream(programData *data)
 					for(int x=0; x < hppl; x++) {
 						int idx = x+(l*hppl);
 						uint8_t pc = (p->payload[idx]);
-						((uint64_t*)data->pixels)[x + ((y+l)*data->pitch/8)] = pixMap[pc];
+						((uint64_t*)data->pixels)[x + ((y+l)*data->pitch/8)] = data->pixMap[pc];
 					}
 				}
 			} else {
@@ -893,7 +891,7 @@ void runStream(programData *data)
 		if(sync) {
 			sync=0;
 			if(data->fast) {
-				if(data->vfp && totalVdataBytes != 0 && totalAdataBytes != 0) {
+				if(data->vfp && data->totalVdataBytes != 0 && data->totalAdataBytes != 0) {
 					fwrite(data->pixels, sizeof(uint32_t)*data->width*data->height, 1, data->vfp);
 				}
 				SDL_UnlockTexture(data->tex);
@@ -972,7 +970,7 @@ int main(int argc, char** argv)
 	runStream(&data);
 
 	if(data.verbose) {
-		printf("\nReceived video data: %"PRIu64" bytes.\nReceived audio data: %"PRIu64" bytes.\n", totalVdataBytes, totalAdataBytes);
+		printf("\nReceived video data: %"PRIu64" bytes.\nReceived audio data: %"PRIu64" bytes.\n", data.totalVdataBytes, data.totalAdataBytes);
 	}
 
 	printf("\n\nThanks to Jens Blidon and Markus Schneider for making my favourite tunes!\nThanks to Booze for making the best remix of Chicanes Halcyon and such beautiful visuals to go along with it!\nThanks to Gideons Logic for the U64!\n\n                                    - DusteD says hi! :-)\n\n");
