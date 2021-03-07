@@ -78,11 +78,12 @@ typedef enum {
 	NUM_OF_COLORSCHEMES
 } colorScheme;
 
-uint64_t totalVdataBytes=0;
-uint64_t totalAdataBytes=0;
-int isStreaming=0;
-
-char ipStr[IP_ADDR_SIZE];
+typedef enum {
+	CMD_START_STREAM,
+	CMD_STOP_STREAM,
+	CMD_RESET,
+	NUM_OF_COMMANDS
+} command;
 
 typedef struct {
 	int scale;
@@ -119,6 +120,33 @@ typedef struct {
 	int pitch;
 } programData;
 
+// I found the colors here: https://gist.github.com/funkatron/758033
+const uint64_t  sred[]   = {0 , 255, 0x68, 0x70, 0x6f, 0x58, 0x35, 0xb8, 0x6f, 0x43, 0x9a, 0x44, 0x6c, 0x9a, 0x6c, 0x95 };
+const uint64_t  sgreen[] = {0 , 255, 0x37, 0xa4, 0x3d, 0x8d, 0x28, 0xc7, 0x4f, 0x39, 0x67, 0x44, 0x6c, 0xd2, 0x5e, 0x95 };
+const uint64_t  sblue[]  = {0 , 255, 0x2b, 0xb2, 0x86, 0x43, 0x79, 0x6f, 0x25, 0x00, 0x59, 0x44, 0x6c, 0x84, 0xb5, 0x95 };
+
+// I found these colors by showing them on my CRT monitor and taking a picture with my dslr, doing white correction on the raw and averaging the pixels
+// They're not mean to be faithful, just thought it'd be kinda fun to see
+const uint64_t dred[]   = { 0x06, 0xf2, 0xb6, 0xa2, 0xaf, 0x86, 0x00, 0xf8, 0xd0, 0x79, 0xfb, 0x5e, 0xa3, 0xd1, 0x6e, 0xdc };
+const uint64_t dgreen[] = { 0x0a, 0xf1, 0x3c, 0xf7, 0x45, 0xf9, 0x3a, 0xfe, 0x6e, 0x4e, 0x91, 0x6e, 0xb6, 0xfc, 0xb3, 0xe2 };
+const uint64_t dblue[]  = { 0x0b, 0xf1, 0x47, 0xed, 0xd7, 0x64, 0xf2, 0x8a, 0x28, 0x00, 0x8f, 0x69, 0xad, 0xc5, 0xff, 0xdb };
+
+uint64_t ured[] =   { 10,255,30,40,50,60,70,80,90,0xa0,0xb0,0xc0,0xd0,0xc0,0xd0,0xe0 };
+uint64_t ugreen[] = { 10,255,30,40,50,60,70,80,90,0xa0,0xb0,0xc0,0xd0,0xc0,0xd0,0xe0 };
+uint64_t ublue[] =  { 10,255,30,40,50,60,70,80,90,0xa0,0xb0,0xc0,0xd0,0xc0,0xd0,0xe0 };
+
+const uint64_t *red = sred;
+const uint64_t *green = sgreen;
+const uint64_t *blue = sblue;
+
+uint64_t pixMap[PIXMAP_SIZE];
+
+uint64_t totalVdataBytes=0;
+uint64_t totalAdataBytes=0;
+int isStreaming=0;
+
+char ipStr[IP_ADDR_SIZE];
+
 void setDefaults(programData *data)
 {
 	memset(data, 0, sizeof(programData));
@@ -140,27 +168,6 @@ char* intToIp(uint32_t ip)
 	sprintf(ipStr, "%02i.%02i.%02i.%02i", (ip & 0x000000ff), (ip & 0x0000ff00)>>8, (ip & 0x00ff0000) >> 16, (ip & 0xff000000) >> 24);
 	return ipStr;
 }
-
-// I found the colors here: https://gist.github.com/funkatron/758033
-const uint64_t  sred[]   = {0 , 255, 0x68, 0x70, 0x6f, 0x58, 0x35, 0xb8, 0x6f, 0x43, 0x9a, 0x44, 0x6c, 0x9a, 0x6c, 0x95 };
-const uint64_t  sgreen[] = {0 , 255, 0x37, 0xa4, 0x3d, 0x8d, 0x28, 0xc7, 0x4f, 0x39, 0x67, 0x44, 0x6c, 0xd2, 0x5e, 0x95 };
-const uint64_t  sblue[]  = {0 , 255, 0x2b, 0xb2, 0x86, 0x43, 0x79, 0x6f, 0x25, 0x00, 0x59, 0x44, 0x6c, 0x84, 0xb5, 0x95 };
-
-// I found these colors by showing them on my CRT monitor and taking a picture with my dslr, doing white correction on the raw and averaging the pixels
-// They're not mean to be faithful, just thought it'd be kinda fun to see
-const uint64_t dred[]   = { 0x06, 0xf2, 0xb6, 0xa2, 0xaf, 0x86, 0x00, 0xf8, 0xd0, 0x79, 0xfb, 0x5e, 0xa3, 0xd1, 0x6e, 0xdc };
-const uint64_t dgreen[] = { 0x0a, 0xf1, 0x3c, 0xf7, 0x45, 0xf9, 0x3a, 0xfe, 0x6e, 0x4e, 0x91, 0x6e, 0xb6, 0xfc, 0xb3, 0xe2 };
-const uint64_t dblue[]  = { 0x0b, 0xf1, 0x47, 0xed, 0xd7, 0x64, 0xf2, 0x8a, 0x28, 0x00, 0x8f, 0x69, 0xad, 0xc5, 0xff, 0xdb };
-
-uint64_t ured[] =   { 10,255,30,40,50,60,70,80,90,0xa0,0xb0,0xc0,0xd0,0xc0,0xd0,0xe0 };
-uint64_t ugreen[] = { 10,255,30,40,50,60,70,80,90,0xa0,0xb0,0xc0,0xd0,0xc0,0xd0,0xe0 };
-uint64_t ublue[] =  { 10,255,30,40,50,60,70,80,90,0xa0,0xb0,0xc0,0xd0,0xc0,0xd0,0xe0 };
-
-const uint64_t *red = sred;
-const uint64_t *green = sgreen;
-const uint64_t *blue = sblue;
-
-uint64_t pixMap[PIXMAP_SIZE];
 
 void setColors(colorScheme colors)
 {
@@ -190,8 +197,6 @@ void setColors(colorScheme colors)
 		int ph = (i & 0xf0) >> 4;
 		int pl = i & 0x0f;
 		pixMap[i] = red[ph] << (64-8) | green[ph]<< (64-16) | blue[ph] << (64-24) | (uint64_t)0xff << (64-32) | red[pl] << (32-8) | green[pl] << (32-16) | blue[pl] << (32-24) | 0xff;
-
-
 	}
 }
 
@@ -324,45 +329,59 @@ int sendCommand(char *hostName, const uint16_t *data, int len)
 	return EXIT_SUCCESS;
 }
 
-int startStream(char *hostName)
+int runCommand(char *hostName, command cmd)
 {
-	int result;
-	const uint16_t data[] = {
+	int result = 0;
+
+	const uint16_t startData[] = {
 		SOCKET_CMD_VICSTREAM_ON,
 		0x0000,
 		SOCKET_CMD_AUDIOSTREAM_ON,
 		0x0000
 	};
 
-	printf("Sending start stream command to Ultimate64...\n");
-	result = sendCommand(hostName, data, sizeof(data) / sizeof(data[0]));
-	if (result != EXIT_SUCCESS) {
-		return result;
-	}
-	printf("  * done.\n");
-	isStreaming=1;
-
-	return EXIT_SUCCESS;
-}
-
-int stopStream(char* hostName)
-{
-	int result;
-	const uint16_t data[] = {
+	const uint16_t stopData[] = {
 		SOCKET_CMD_VICSTREAM_OFF,
 		0x0000,
 		SOCKET_CMD_AUDIOSTREAM_OFF,
 		0x0000
 	};
 
-	printf("Sending stop stream command to Ultimate64...\n");
-	result = sendCommand(hostName, data, sizeof(data) / sizeof(data[0]));
-	if (result != EXIT_SUCCESS) {
-		return result;
-	}
-	printf("  * done.\n");
-	isStreaming=0;
+	const uint16_t resetData[] = {
+		SOCKET_CMD_RESET,
+		0x0000
+	};
 
+	switch(cmd) {
+		case CMD_START_STREAM:
+			printf("Sending start stream command to Ultimate64...\n");
+			result = sendCommand(hostName, startData, sizeof(startData) / sizeof(startData[0]));
+			if (result != EXIT_SUCCESS) {
+				return result;
+			}
+			isStreaming=1;
+			break;
+		case CMD_STOP_STREAM:
+			printf("Sending stop stream command to Ultimate64...\n");
+			result = sendCommand(hostName, stopData, sizeof(stopData) / sizeof(stopData[0]));
+			if (result != EXIT_SUCCESS) {
+				return result;
+			}
+			isStreaming=0;
+			break;
+		case CMD_RESET:
+			printf("Sending reset command to Ultimate64...\n");
+			result = sendCommand(hostName, resetData, sizeof(resetData) / sizeof(resetData[0]));
+			if (result != EXIT_SUCCESS) {
+				return result;
+			}
+			isStreaming=0;
+			break;
+		default:
+			return EXIT_FAILURE;
+	}
+
+	printf("  * done.\n");
 	return EXIT_SUCCESS;
 }
 
@@ -380,25 +399,6 @@ int powerOff(char* hostName)
 
 	printf("Sending power-off sequence to Ultimate64...\n");
 	result = sendSequence(hostName, data, sizeof(data));
-	if (result != EXIT_SUCCESS) {
-		return result;
-	}
-	printf("  * done.\n");
-	isStreaming=0;
-
-	return EXIT_SUCCESS;
-}
-
-int reset(char* hostName)
-{
-	int result;
-	const uint16_t data[] = {
-		SOCKET_CMD_RESET,
-		0x0000
-	};
-
-	printf("Sending reset sequence to Ultimate64...\n");
-	result = sendCommand(hostName, data, sizeof(data));
 	if (result != EXIT_SUCCESS) {
 		return result;
 	}
@@ -617,7 +617,7 @@ int setupStream(programData *data)
 	}
 
 	if(strlen(data->hostName) && data->startStreamOnStart) {
-		if (startStream(data->hostName) != EXIT_SUCCESS) {
+		if (runCommand(data->hostName, CMD_START_STREAM) != EXIT_SUCCESS) {
 			goto clean_up;
 		}
 	}
@@ -766,11 +766,11 @@ void runStream(programData *data)
 						printf("Can only start/stop stream when started with -u, -U or -I.\n");
 					} else {
 						if(isStreaming) {
-							if (stopStream(data->hostName) != EXIT_SUCCESS) {
+							if (runCommand(data->hostName, CMD_STOP_STREAM) != EXIT_SUCCESS) {
 								run = 0;
 							}
 						} else {
-							if (startStream(data->hostName) != EXIT_SUCCESS) {
+							if (runCommand(data->hostName, CMD_START_STREAM) != EXIT_SUCCESS) {
 								run = 0;
 							}
 						}
@@ -788,7 +788,7 @@ void runStream(programData *data)
 				break;
 				case SDLK_r:
 					if(strlen(data->hostName)) {
-						if (reset(data->hostName) != EXIT_SUCCESS) {
+						if (runCommand(data->hostName, CMD_RESET) != EXIT_SUCCESS) {
 							run = 0;
 						}
 					} else {
@@ -910,7 +910,7 @@ void runStream(programData *data)
 	}
 
 	if(strlen(data->hostName) && data->stopStreamOnExit) {
-		stopStream(data->hostName);
+		runCommand(data->hostName, CMD_STOP_STREAM);
 	}
 
 	SDL_DestroyTexture(data->tex);
