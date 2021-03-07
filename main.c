@@ -122,6 +122,10 @@ typedef struct {
 	uint64_t totalVdataBytes;
 	uint64_t totalAdataBytes;
 	uint64_t pixMap[PIXMAP_SIZE];
+	const uint64_t *red;
+	const uint64_t *green;
+	const uint64_t *blue;
+	char ipStr[IP_ADDR_SIZE];
 } programData;
 
 // I found the colors here: https://gist.github.com/funkatron/758033
@@ -139,12 +143,6 @@ uint64_t ured[] =   { 10,255,30,40,50,60,70,80,90,0xa0,0xb0,0xc0,0xd0,0xc0,0xd0,
 uint64_t ugreen[] = { 10,255,30,40,50,60,70,80,90,0xa0,0xb0,0xc0,0xd0,0xc0,0xd0,0xe0 };
 uint64_t ublue[] =  { 10,255,30,40,50,60,70,80,90,0xa0,0xb0,0xc0,0xd0,0xc0,0xd0,0xe0 };
 
-const uint64_t *red = sred;
-const uint64_t *green = sgreen;
-const uint64_t *blue = sblue;
-
-char ipStr[IP_ADDR_SIZE];
-
 void setDefaults(programData *data)
 {
 	memset(data, 0, sizeof(programData));
@@ -159,33 +157,36 @@ void setDefaults(programData *data)
 	data->listenaudio = DEFAULT_LISTENAUDIO_PORT;
 	data->width = DEFAULT_WIDTH;
 	data->height = DEFAULT_HEIGHT;
+	data->red = sred;
+	data->green = sgreen;
+	data->blue = sblue;
 }
 
-char* intToIp(uint32_t ip)
+char* intToIp(programData *data, uint32_t ip)
 {
-	sprintf(ipStr, "%02i.%02i.%02i.%02i", (ip & 0x000000ff), (ip & 0x0000ff00)>>8, (ip & 0x00ff0000) >> 16, (ip & 0xff000000) >> 24);
-	return ipStr;
+	sprintf(data->ipStr, "%02i.%02i.%02i.%02i", (ip & 0x000000ff), (ip & 0x0000ff00)>>8, (ip & 0x00ff0000) >> 16, (ip & 0xff000000) >> 24);
+	return data->ipStr;
 }
 
 void setColors(programData *data)
 {
 	switch(data->curColors) {
 		case DCOLORS:
-			red = dred;
-			green = dgreen;
-			blue = dblue;
+			data->red = dred;
+			data->green = dgreen;
+			data->blue = dblue;
 			break;
 		case UCOLORS:
-			red = ured;
-			green = ugreen;
-			blue = ublue;
+			data->red = ured;
+			data->green = ugreen;
+			data->blue = ublue;
 			break;
 		case SCOLORS:
 		/* fall through */
 		default:
-			red = sred;
-			green = sgreen;
-			blue = sblue;
+			data->red = sred;
+			data->green = sgreen;
+			data->blue = sblue;
 			break;
 	}
 
@@ -194,7 +195,10 @@ void setColors(programData *data)
 	for(int i=0; i<PIXMAP_SIZE; i++) {
 		int ph = (i & 0xf0) >> 4;
 		int pl = i & 0x0f;
-		data->pixMap[i] = red[ph] << (64-8) | green[ph]<< (64-16) | blue[ph] << (64-24) | (uint64_t)0xff << (64-32) | red[pl] << (32-8) | green[pl] << (32-16) | blue[pl] << (32-24) | 0xff;
+		data->pixMap[i] = data->red[ph] << (64-8) | data->green[ph]<< (64-16) |
+			data->blue[ph] << (64-24) | (uint64_t)0xff << (64-32) |
+			data->red[pl] << (32-8) | data->green[pl] << (32-16) |
+			data->blue[pl] << (32-24) | 0xff;
 	}
 }
 
@@ -807,7 +811,7 @@ void runStream(programData *data)
 
 				if(data->totalAdataBytes==0) {
 					printf("Got data on audio port (%i) from %s:%i\n", data->listenaudio,
-						intToIp(data->audpkg->address.host), data->audpkg->address.port );
+						intToIp(data, data->audpkg->address.host), data->audpkg->address.port );
 				}
 				data->totalAdataBytes += sizeof(a64msg_t);
 
@@ -831,7 +835,7 @@ void runStream(programData *data)
 		if(r==1 && !data->showHelp) {
 			if(data->totalVdataBytes==0) {
 				printf("Got data on video port (%i) from %s:%i\n", data->listen,
-				       intToIp(data->pkg->address.host), data->pkg->address.port );
+				       intToIp(data, data->pkg->address.host), data->pkg->address.port );
 			}
 			data->totalVdataBytes += sizeof(u64msg_t);
 
@@ -857,15 +861,15 @@ void runStream(programData *data)
 						int idx = x+(l*p->pixelsInLine/2);
 						int pl = (p->payload[idx] & 0x0f);
 						int ph = (p->payload[idx] & 0xf0) >> 4;
-						int r = red[pl];
-						int g = green[pl];
-						int b = blue[pl];
+						int r = data->red[pl];
+						int g = data->green[pl];
+						int b = data->blue[pl];
 
 						SDL_SetRenderDrawColor(data->ren, r, g, b, 255);
 						SDL_RenderDrawPoint(data->ren, x*2, y+l);
-						r = red[ph];
-						g = green[ph];
-						b = blue[ph];
+						r = data->red[ph];
+						g = data->green[ph];
+						b = data->blue[ph];
 						SDL_SetRenderDrawColor(data->ren, r, g, b, 255);
 						SDL_RenderDrawPoint(data->ren, x*2+1, y+l);
 					}
