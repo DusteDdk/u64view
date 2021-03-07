@@ -12,6 +12,16 @@
 #include <SDL2/SDL_net.h>
 #include "64.h"
 
+//#define DEBUG
+
+// Only available on U64
+#define SOCKET_CMD_VICSTREAM_ON    0xFF20
+#define SOCKET_CMD_AUDIOSTREAM_ON  0xFF21
+#define SOCKET_CMD_DEBUGSTREAM_ON  0xFF22
+#define SOCKET_CMD_VICSTREAM_OFF   0xFF30
+#define SOCKET_CMD_AUDIOSTREAM_OFF 0xFF31
+#define SOCKET_CMD_DEBUGSTREAM_OFF 0xFF32
+
 #define MAX_STRING_SIZE 4096
 #define UDP_PAYLOAD_SIZE 768
 #define SAMPLE_SIZE 192*4
@@ -22,6 +32,7 @@
 #define DEFAULT_HEIGHT 272
 #define TCP_BUFFER_SIZE 1024
 #define TELNET_PORT 23
+#define COMMAND_PORT 64
 #define SDLNET_TIMEOUT 30
 #define SDLNET_STREAM_TIMEOUT 200
 #define USER_COLORS 16*6 + 15 // 16 6 byte values + the 15 commas between them
@@ -198,26 +209,26 @@ void pic(SDL_Texture* tex, int width, int height, int pitch, uint32_t* pixels)
 	}
 }
 
-void sendSequence(char *hostName, const uint8_t *data, int len)
+int sendSequence(char *hostName, const uint8_t *data, int len)
 {
 	IPaddress ip;
 	TCPsocket sock;
 	uint8_t buf[TCP_BUFFER_SIZE];
 	SDLNet_SocketSet set;
 	set=SDLNet_AllocSocketSet(1);
-	int result =0;
+	int result = 0;
 
 	if(SDLNet_ResolveHost(&ip, hostName, TELNET_PORT)) {
 		printf("Error resolving '%s' : %s\n", hostName, SDLNet_GetError());
 		SDLNet_FreeSocketSet(set);
-		return;
+		return EXIT_FAILURE;
 	}
 
 	sock = SDLNet_TCP_Open(&ip);
 	if(!sock) {
 		printf("Error connecting to '%s' : %s\n", hostName, SDLNet_GetError());
 		SDLNet_FreeSocketSet(set);
-		return;
+		return EXIT_FAILURE;
 	}
 
 	SDLNet_TCP_AddSocket(set, sock);
@@ -225,11 +236,15 @@ void sendSequence(char *hostName, const uint8_t *data, int len)
 	SDL_Delay(COMMAND_DELAY);
 	for(int i=0; i < len; i++) {
 		SDL_Delay(1);
-		if(SDLNet_TCP_Send(sock, &data[i], 1) <1 ) {
+#if defined(DEBUG)
+		printf("sending: %02x\n", data[i]);
+#endif
+		result = SDLNet_TCP_Send(sock, &data[i], sizeof(uint8_t));
+		if(result < sizeof(uint8_t)) {
 			printf("Error sending command data: %s\n", SDLNet_GetError());
 			SDLNet_TCP_Close(sock);
 			SDLNet_FreeSocketSet(set);
-			return;
+			return EXIT_FAILURE;
 		}
 		// Empty u64 send buffer
 		while( SDLNet_CheckSockets(set, SDLNET_TIMEOUT) == 1 ) {
@@ -241,86 +256,106 @@ void sendSequence(char *hostName, const uint8_t *data, int len)
 
 	SDLNet_TCP_Close(sock);
 	SDLNet_FreeSocketSet(set);
+
+	return EXIT_SUCCESS;
 }
 
-// Yeye, these are fragile, they're good enough for now.
-void startStream(char *hostName)
+int sendCommand(char *hostName, const uint16_t *data, int len)
 {
-	const uint8_t data[] = {
-		// Video stream
-		0x1b, 0x5b, 0x31, 0x35, 0x7e, // f5
-		0x1b, 0x5b, 0x42, // Arrow down
-		0x1b, 0x5b, 0x42,
-		0x1b, 0x5b, 0x42,
-		0x1b, 0x5b, 0x42,
-		0x1b, 0x5b, 0x42,
-		0x1b, 0x5b, 0x42,
-		0x1b, 0x5b, 0x42,
-		0x1b, 0x5b, 0x42,
-		0xd, 0x00, //enter
-		0xd, 0x00,
-		0xd, 0x00,
-		// Audio stream
-		0x1b, 0x5b, 0x31, 0x35, 0x7e, // f5
-		0x1b, 0x5b, 0x42, // Arrow down
-		0x1b, 0x5b, 0x42,
-		0x1b, 0x5b, 0x42,
-		0x1b, 0x5b, 0x42,
-		0x1b, 0x5b, 0x42,
-		0x1b, 0x5b, 0x42,
-		0x1b, 0x5b, 0x42,
-		0x1b, 0x5b, 0x42,
-		0xd, 0x00, //enter
-		0x1b, 0x5b, 0x42, // Arrow down
-		0xd, 0x00,
-		0xd, 0x00
+	IPaddress ip;
+	TCPsocket sock;
+	uint8_t buf[TCP_BUFFER_SIZE];
+	SDLNet_SocketSet set;
+	set=SDLNet_AllocSocketSet(1);
+	int result = 0;
+
+	if(SDLNet_ResolveHost(&ip, hostName, COMMAND_PORT)) {
+		printf("Error resolving '%s' : %s\n", hostName, SDLNet_GetError());
+		SDLNet_FreeSocketSet(set);
+		return EXIT_FAILURE;
+	}
+
+	sock = SDLNet_TCP_Open(&ip);
+	if(!sock) {
+		printf("Error connecting to '%s' : %s\n", hostName, SDLNet_GetError());
+		SDLNet_FreeSocketSet(set);
+		return EXIT_FAILURE;
+	}
+
+	SDLNet_TCP_AddSocket(set, sock);
+
+	SDL_Delay(COMMAND_DELAY);
+	for(int i=0; i < len; i++) {
+		SDL_Delay(1);
+#if defined(DEBUG)
+		printf("sending: %04x\n", data[i]);
+#endif
+		result = SDLNet_TCP_Send(sock, &data[i], sizeof(uint16_t));
+		if(result < sizeof(uint16_t)) {
+			printf("Error sending command data: %s\n", SDLNet_GetError());
+			SDLNet_TCP_Close(sock);
+			SDLNet_FreeSocketSet(set);
+			return EXIT_FAILURE;
+		}
+		// Empty u64 send buffer
+		while( SDLNet_CheckSockets(set, SDLNET_TIMEOUT) == 1 ) {
+			result = SDLNet_TCP_Recv(sock, &buf, TCP_BUFFER_SIZE - 1);
+			buf[result]=0;
+			//puts(buf); // debug, messes up terminal.
+		}
+	}
+
+	SDLNet_TCP_Close(sock);
+	SDLNet_FreeSocketSet(set);
+
+	return EXIT_SUCCESS;
+}
+
+int startStream(char *hostName)
+{
+	int result;
+	const uint16_t data[] = {
+		SOCKET_CMD_VICSTREAM_ON,
+		0x0000,
+		SOCKET_CMD_AUDIOSTREAM_ON,
+		0x0000
 	};
 
-	printf("Sending start stream sequence to Ultimate64...\n");
-	sendSequence(hostName, data, sizeof(data));
+	printf("Sending start stream command to Ultimate64...\n");
+	result = sendCommand(hostName, data, sizeof(data) / sizeof(data[0]));
+	if (result != EXIT_SUCCESS) {
+		return result;
+	}
 	printf("  * done.\n");
 	isStreaming=1;
+
+	return EXIT_SUCCESS;
 }
 
-void stopStream(char* hostName)
+int stopStream(char* hostName)
 {
-	const uint8_t data[] = {
-		// Video stream
-		0x1b, 0x5b, 0x31, 0x35, 0x7e, // f5
-		0x1b, 0x5b, 0x42, // Arrow down
-		0x1b, 0x5b, 0x42,
-		0x1b, 0x5b, 0x42,
-		0x1b, 0x5b, 0x42,
-		0x1b, 0x5b, 0x42,
-		0x1b, 0x5b, 0x42,
-		0x1b, 0x5b, 0x42,
-		0x1b, 0x5b, 0x42,
-		0xd, 0x00, //enter
-		0xd, 0x00,
-		// Audio stream
-		0x1b, 0x5b, 0x31, 0x35, 0x7e, // f5
-		0x1b, 0x5b, 0x42, // Arrow down
-		0x1b, 0x5b, 0x42,
-		0x1b, 0x5b, 0x42,
-		0x1b, 0x5b, 0x42,
-		0x1b, 0x5b, 0x42,
-		0x1b, 0x5b, 0x42,
-		0x1b, 0x5b, 0x42,
-		0x1b, 0x5b, 0x42,
-		0xd, 0x00, //enter
-		0x1b, 0x5b, 0x42, // Arrow down
-		0xd, 0x00
+	int result;
+	const uint16_t data[] = {
+		SOCKET_CMD_VICSTREAM_OFF,
+		0x0000,
+		SOCKET_CMD_AUDIOSTREAM_OFF,
+		0x0000
 	};
 
-	printf("Sending stop stream sequence to Ultimate64...\n");
-	sendSequence(hostName, data, sizeof(data));
+	printf("Sending stop stream command to Ultimate64...\n");
+	result = sendCommand(hostName, data, sizeof(data) / sizeof(data[0]));
+	if (result != EXIT_SUCCESS) {
+		return result;
+	}
 	printf("  * done.\n");
 	isStreaming=0;
+
+	return EXIT_SUCCESS;
 }
 
-
-void powerOff(char* hostName)
+int powerOff(char* hostName)
 {
+	int result;
 	const uint8_t data[] = {
 		0x1b, 0x5b, 0x31, 0x35, 0x7e, // f5
 		0x1b, 0x5b, 0x42, // Arrow down
@@ -331,13 +366,19 @@ void powerOff(char* hostName)
 	};
 
 	printf("Sending power-off sequence to Ultimate64...\n");
-	sendSequence(hostName, data, sizeof(data));
+	result = sendSequence(hostName, data, sizeof(data));
+	if (result != EXIT_SUCCESS) {
+		return result;
+	}
 	printf("  * done.\n");
 	isStreaming=0;
+
+	return EXIT_SUCCESS;
 }
 
-void reset(char* hostName)
+int reset(char* hostName)
 {
+	int result;
 	const uint8_t data[] = {
 		0x1b, 0x5b, 0x31, 0x35, 0x7e, // f5
 		0x1b, 0x5b, 0x42, // Arrow down
@@ -346,9 +387,14 @@ void reset(char* hostName)
 	};
 
 	printf("Sending reset sequence to Ultimate64...\n");
-	sendSequence(hostName, data, sizeof(data));
+	result = sendSequence(hostName, data, sizeof(data));
+	if (result != EXIT_SUCCESS) {
+		return result;
+	}
 	printf("  * done.\n");
 	isStreaming=0;
+
+	return EXIT_SUCCESS;
 }
 
 void printColors(const uint64_t *red, const uint64_t *green, const uint64_t *blue)
@@ -560,7 +606,9 @@ int setupStream(programData *data)
 	}
 
 	if(strlen(data->hostName) && data->startStreamOnStart) {
-		startStream(data->hostName);
+		if (startStream(data->hostName) != EXIT_SUCCESS) {
+			goto clean_up;
+		}
 	}
 
 	data->set=SDLNet_AllocSocketSet(2);
@@ -707,9 +755,13 @@ void runStream(programData *data)
 						printf("Can only start/stop stream when started with -u, -U or -I.\n");
 					} else {
 						if(isStreaming) {
-							stopStream(data->hostName);
+							if (stopStream(data->hostName) != EXIT_SUCCESS) {
+								run = 0;
+							}
 						} else {
-							startStream(data->hostName);
+							if (startStream(data->hostName) != EXIT_SUCCESS) {
+								run = 0;
+							}
 						}
 					}
 				break;
@@ -718,12 +770,16 @@ void runStream(programData *data)
 				break;
 				case SDLK_p:
 					data->stopStreamOnExit=0;
-					powerOff(data->hostName);
+					if (powerOff(data->hostName) != EXIT_SUCCESS) {
+						run = 0;
+					}
 					memset(data->hostName, 0, sizeof data->hostName);
 				break;
 				case SDLK_r:
 					if(strlen(data->hostName)) {
-						reset(data->hostName);
+						if (reset(data->hostName) != EXIT_SUCCESS) {
+							run = 0;
+						}
 					} else {
 						printf("Can only reset when start with -u, -U or -I.\n");
 					}
@@ -888,13 +944,14 @@ int main(int argc, char** argv)
 	programData data;
 
 	setDefaults(&data);
-	printf("\nUltimate 64 view!\n-----------------\n  Try -h for options.\n\n");
+	printf("\nUltimate 64 view!\n-----------------\n");
+	printf("Please enable command interface on the Ultimate64\nTry -h for options.\n\n");
 
 	if (parseArguments(argc, argv, &data) == EXIT_FAILURE) {
 		return EXIT_FAILURE;
 	}
 
-	printf("Ultimate64 telnet interface at %s\n", data.hostName);
+	printf("Ultimate64 telnet/command interface at %s\n", data.hostName);
 
 	if (setupStream(&data) == EXIT_FAILURE) {
 		return EXIT_FAILURE;
