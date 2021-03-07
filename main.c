@@ -227,7 +227,7 @@ void pic(SDL_Texture* tex, int width, int height, int pitch, uint32_t* pixels)
 	}
 }
 
-int sendSequence(char *hostName, const uint8_t *data, int len)
+int sendSequence(programData *prgData, const uint8_t *data, int len)
 {
 	IPaddress ip;
 	TCPsocket sock;
@@ -236,15 +236,15 @@ int sendSequence(char *hostName, const uint8_t *data, int len)
 	set=SDLNet_AllocSocketSet(1);
 	int result = 0;
 
-	if(SDLNet_ResolveHost(&ip, hostName, TELNET_PORT)) {
-		printf("Error resolving '%s' : %s\n", hostName, SDLNet_GetError());
+	if(SDLNet_ResolveHost(&ip, prgData->hostName, TELNET_PORT)) {
+		printf("Error resolving '%s' : %s\n", prgData->hostName, SDLNet_GetError());
 		SDLNet_FreeSocketSet(set);
 		return EXIT_FAILURE;
 	}
 
 	sock = SDLNet_TCP_Open(&ip);
 	if(!sock) {
-		printf("Error connecting to '%s' : %s\n", hostName, SDLNet_GetError());
+		printf("Error connecting to '%s' : %s\n", prgData->hostName, SDLNet_GetError());
 		SDLNet_FreeSocketSet(set);
 		return EXIT_FAILURE;
 	}
@@ -278,7 +278,7 @@ int sendSequence(char *hostName, const uint8_t *data, int len)
 	return EXIT_SUCCESS;
 }
 
-int sendCommand(char *hostName, const uint16_t *data, int len)
+int sendCommand(programData *prgData, const uint16_t *data, int len)
 {
 	IPaddress ip;
 	TCPsocket sock;
@@ -287,15 +287,15 @@ int sendCommand(char *hostName, const uint16_t *data, int len)
 	set=SDLNet_AllocSocketSet(1);
 	int result = 0;
 
-	if(SDLNet_ResolveHost(&ip, hostName, COMMAND_PORT)) {
-		printf("Error resolving '%s' : %s\n", hostName, SDLNet_GetError());
+	if(SDLNet_ResolveHost(&ip, prgData->hostName, COMMAND_PORT)) {
+		printf("Error resolving '%s' : %s\n", prgData->hostName, SDLNet_GetError());
 		SDLNet_FreeSocketSet(set);
 		return EXIT_FAILURE;
 	}
 
 	sock = SDLNet_TCP_Open(&ip);
 	if(!sock) {
-		printf("Error connecting to '%s' : %s\n", hostName, SDLNet_GetError());
+		printf("Error connecting to '%s' : %s\n", prgData->hostName, SDLNet_GetError());
 		SDLNet_FreeSocketSet(set);
 		return EXIT_FAILURE;
 	}
@@ -329,7 +329,7 @@ int sendCommand(char *hostName, const uint16_t *data, int len)
 	return EXIT_SUCCESS;
 }
 
-int runCommand(char *hostName, command cmd)
+int runCommand(programData *prgData, command cmd)
 {
 	int result = 0;
 
@@ -355,7 +355,7 @@ int runCommand(char *hostName, command cmd)
 	switch(cmd) {
 		case CMD_START_STREAM:
 			printf("Sending start stream command to Ultimate64...\n");
-			result = sendCommand(hostName, startData, sizeof(startData) / sizeof(startData[0]));
+			result = sendCommand(prgData, startData, sizeof(startData) / sizeof(startData[0]));
 			if (result != EXIT_SUCCESS) {
 				return result;
 			}
@@ -363,7 +363,7 @@ int runCommand(char *hostName, command cmd)
 			break;
 		case CMD_STOP_STREAM:
 			printf("Sending stop stream command to Ultimate64...\n");
-			result = sendCommand(hostName, stopData, sizeof(stopData) / sizeof(stopData[0]));
+			result = sendCommand(prgData, stopData, sizeof(stopData) / sizeof(stopData[0]));
 			if (result != EXIT_SUCCESS) {
 				return result;
 			}
@@ -371,7 +371,7 @@ int runCommand(char *hostName, command cmd)
 			break;
 		case CMD_RESET:
 			printf("Sending reset command to Ultimate64...\n");
-			result = sendCommand(hostName, resetData, sizeof(resetData) / sizeof(resetData[0]));
+			result = sendCommand(prgData, resetData, sizeof(resetData) / sizeof(resetData[0]));
 			if (result != EXIT_SUCCESS) {
 				return result;
 			}
@@ -385,7 +385,7 @@ int runCommand(char *hostName, command cmd)
 	return EXIT_SUCCESS;
 }
 
-int powerOff(char* hostName)
+int powerOff(programData *prgData)
 {
 	int result;
 	const uint8_t data[] = {
@@ -398,7 +398,7 @@ int powerOff(char* hostName)
 	};
 
 	printf("Sending power-off sequence to Ultimate64...\n");
-	result = sendSequence(hostName, data, sizeof(data));
+	result = sendSequence(prgData, data, sizeof(data));
 	if (result != EXIT_SUCCESS) {
 		return result;
 	}
@@ -617,7 +617,7 @@ int setupStream(programData *data)
 	}
 
 	if(strlen(data->hostName) && data->startStreamOnStart) {
-		if (runCommand(data->hostName, CMD_START_STREAM) != EXIT_SUCCESS) {
+		if (runCommand(data, CMD_START_STREAM) != EXIT_SUCCESS) {
 			goto clean_up;
 		}
 	}
@@ -766,11 +766,11 @@ void runStream(programData *data)
 						printf("Can only start/stop stream when started with -u, -U or -I.\n");
 					} else {
 						if(isStreaming) {
-							if (runCommand(data->hostName, CMD_STOP_STREAM) != EXIT_SUCCESS) {
+							if (runCommand(data, CMD_STOP_STREAM) != EXIT_SUCCESS) {
 								run = 0;
 							}
 						} else {
-							if (runCommand(data->hostName, CMD_START_STREAM) != EXIT_SUCCESS) {
+							if (runCommand(data, CMD_START_STREAM) != EXIT_SUCCESS) {
 								run = 0;
 							}
 						}
@@ -781,14 +781,14 @@ void runStream(programData *data)
 				break;
 				case SDLK_p:
 					data->stopStreamOnExit=0;
-					if (powerOff(data->hostName) != EXIT_SUCCESS) {
+					if (powerOff(data) != EXIT_SUCCESS) {
 						run = 0;
 					}
 					memset(data->hostName, 0, sizeof data->hostName);
 				break;
 				case SDLK_r:
 					if(strlen(data->hostName)) {
-						if (runCommand(data->hostName, CMD_RESET) != EXIT_SUCCESS) {
+						if (runCommand(data, CMD_RESET) != EXIT_SUCCESS) {
 							run = 0;
 						}
 					} else {
@@ -910,7 +910,7 @@ void runStream(programData *data)
 	}
 
 	if(strlen(data->hostName) && data->stopStreamOnExit) {
-		runCommand(data->hostName, CMD_STOP_STREAM);
+		runCommand(data, CMD_STOP_STREAM);
 	}
 
 	SDL_DestroyTexture(data->tex);
