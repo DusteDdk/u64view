@@ -12,7 +12,25 @@
 #include <SDL2/SDL_net.h>
 #include "64.h"
 
-//#define DEBUG
+#define MAX_STRING_SIZE 4096
+#define UDP_PAYLOAD_SIZE 768
+#define SAMPLE_SIZE 192*4
+#define IP_ADDR_SIZE 64
+#define DEFAULT_LISTEN_PORT 11000
+#define DEFAULT_LISTENAUDIO_PORT 11001
+#define DEFAULT_WIDTH 384
+#define DEFAULT_HEIGHT 272
+#define TCP_BUFFER_SIZE 1024
+#define TELNET_PORT 23
+#define COMMAND_PORT 64
+#define SDLNET_TIMEOUT 30
+#define SDLNET_STREAM_TIMEOUT 200
+#define USER_COLORS 16*6 + 15 // 16 6 byte values + the 15 commas between them
+#define PIXMAP_SIZE 0x100
+#define COMMAND_DELAY 10
+#define AUDIO_FREQUENCY 48000
+#define AUDIO_CHANNELS 2
+#define AUDIO_SAMPLES 192
 
 // "Ok ok, use them then..."
 #define SOCKET_CMD_DMA         0xFF01
@@ -34,26 +52,6 @@
 #define SOCKET_CMD_VICSTREAM_OFF   0xFF30
 #define SOCKET_CMD_AUDIOSTREAM_OFF 0xFF31
 #define SOCKET_CMD_DEBUGSTREAM_OFF 0xFF32
-
-#define MAX_STRING_SIZE 4096
-#define UDP_PAYLOAD_SIZE 768
-#define SAMPLE_SIZE 192*4
-#define IP_ADDR_SIZE 64
-#define DEFAULT_LISTEN_PORT 11000
-#define DEFAULT_LISTENAUDIO_PORT 11001
-#define DEFAULT_WIDTH 384
-#define DEFAULT_HEIGHT 272
-#define TCP_BUFFER_SIZE 1024
-#define TELNET_PORT 23
-#define COMMAND_PORT 64
-#define SDLNET_TIMEOUT 30
-#define SDLNET_STREAM_TIMEOUT 200
-#define USER_COLORS 16*6 + 15 // 16 6 byte values + the 15 commas between them
-#define PIXMAP_SIZE 0x100
-#define COMMAND_DELAY 10
-#define AUDIO_FREQUENCY 48000
-#define AUDIO_CHANNELS 2
-#define AUDIO_SAMPLES 192
 
 typedef struct __attribute__((__packed__)) {
 	uint16_t seq;
@@ -256,9 +254,11 @@ int sendSequence(programData *prgData, const uint8_t *data, int len)
 	SDL_Delay(COMMAND_DELAY);
 	for(int i=0; i < len; i++) {
 		SDL_Delay(1);
-#if defined(DEBUG)
-		printf("sending: %02x\n", data[i]);
-#endif
+
+		if (prgData->verbose) {
+			printf("sending: %02x\n", data[i]);
+		}
+
 		result = SDLNet_TCP_Send(sock, &data[i], sizeof(uint8_t));
 		if(result < sizeof(uint8_t)) {
 			printf("Error sending command data: %s\n", SDLNet_GetError());
@@ -307,9 +307,11 @@ int sendCommand(programData *prgData, const uint16_t *data, int len)
 	SDL_Delay(COMMAND_DELAY);
 	for(int i=0; i < len; i++) {
 		SDL_Delay(1);
-#if defined(DEBUG)
-		printf("sending: %04x\n", data[i]);
-#endif
+
+		if (prgData->verbose) {
+			printf("sending: %04x\n", data[i]);
+		}
+
 		result = SDLNet_TCP_Send(sock, &data[i], sizeof(uint16_t));
 		if(result < sizeof(uint16_t)) {
 			printf("Error sending command data: %s\n", SDLNet_GetError());
@@ -334,6 +336,9 @@ int sendCommand(programData *prgData, const uint16_t *data, int len)
 int runCommand(programData *prgData, command cmd)
 {
 	int result = 0;
+	const uint16_t *cmdData = NULL;
+	char *infoString = NULL;
+	int size = 0;
 
 	const uint16_t startData[] = {
 		SOCKET_CMD_VICSTREAM_ON,
@@ -356,31 +361,31 @@ int runCommand(programData *prgData, command cmd)
 
 	switch(cmd) {
 		case CMD_START_STREAM:
-			printf("Sending start stream command to Ultimate64...\n");
-			result = sendCommand(prgData, startData, sizeof(startData) / sizeof(startData[0]));
-			if (result != EXIT_SUCCESS) {
-				return result;
-			}
+			infoString = "start stream";
+			cmdData = startData;
+			size = sizeof(startData) / sizeof(startData[0]);
 			prgData->isStreaming=1;
 			break;
 		case CMD_STOP_STREAM:
-			printf("Sending stop stream command to Ultimate64...\n");
-			result = sendCommand(prgData, stopData, sizeof(stopData) / sizeof(stopData[0]));
-			if (result != EXIT_SUCCESS) {
-				return result;
-			}
+			infoString = "stop stream";
+			cmdData = stopData;
+			size = sizeof(stopData) / sizeof(stopData[0]);
 			prgData->isStreaming=0;
 			break;
 		case CMD_RESET:
-			printf("Sending reset command to Ultimate64...\n");
-			result = sendCommand(prgData, resetData, sizeof(resetData) / sizeof(resetData[0]));
-			if (result != EXIT_SUCCESS) {
-				return result;
-			}
-			prgData->isStreaming=0;
+			infoString = "reset";
+			cmdData = resetData;
+			size = sizeof(resetData) / sizeof(resetData[0]);
 			break;
 		default:
 			return EXIT_FAILURE;
+	}
+
+	printf("Sending %s command to Ultimate64...\n", infoString);
+
+	result = sendCommand(prgData, cmdData, size);
+	if (result != EXIT_SUCCESS) {
+		return result;
 	}
 
 	printf("  * done.\n");
