@@ -53,6 +53,13 @@
 #define SOCKET_CMD_AUDIOSTREAM_OFF 0xFF31
 #define SOCKET_CMD_DEBUGSTREAM_OFF 0xFF32
 
+#if !defined(likely)
+#define likely(x)    __builtin_expect (!!(x), 1)
+#endif
+#if !defined(unlikely)
+#define unlikely(x)  __builtin_expect (!!(x), 0)
+#endif
+
 typedef struct __attribute__((__packed__)) {
 	uint16_t seq;
 	uint16_t frame;
@@ -160,13 +167,13 @@ void setDefaults(programData *data)
 	data->blue = sblue;
 }
 
-char* intToIp(programData *data, uint32_t ip)
+static inline char* intToIp(programData *data, uint32_t ip)
 {
 	sprintf(data->ipStr, "%02i.%02i.%02i.%02i", (ip & 0x000000ff), (ip & 0x0000ff00)>>8, (ip & 0x00ff0000) >> 16, (ip & 0xff000000) >> 24);
 	return data->ipStr;
 }
 
-void setColors(programData *data)
+static inline void setColors(programData *data)
 {
 	switch(data->curColors) {
 		case DCOLORS:
@@ -200,7 +207,7 @@ void setColors(programData *data)
 	}
 }
 
-void chkSeq(programData *data, const char* msg, uint16_t *lseq, uint16_t cseq)
+static inline void chkSeq(programData *data, const char* msg, uint16_t *lseq, uint16_t cseq)
 {
 	if((uint16_t)(*lseq+1) != cseq && (data->totalAdataBytes>1024*10 && data->totalVdataBytes > 1024*1024) ) {
 		printf(msg, *lseq, cseq);
@@ -208,7 +215,7 @@ void chkSeq(programData *data, const char* msg, uint16_t *lseq, uint16_t cseq)
 	*lseq=cseq;
 }
 
-void pic(SDL_Texture* tex, int width, int height, int pitch, uint32_t* pixels)
+static inline void pic(SDL_Texture* tex, int width, int height, int pitch, uint32_t* pixels)
 {
 	union {
 		uint8_t p[4];
@@ -255,7 +262,7 @@ int sendSequence(programData *prgData, const uint8_t *data, int len)
 	for(int i=0; i < len; i++) {
 		SDL_Delay(1);
 
-		if (prgData->verbose) {
+		if (unlikely(prgData->verbose)) {
 			printf("sending: %02x\n", data[i]);
 		}
 
@@ -308,7 +315,7 @@ int sendCommand(programData *prgData, const uint16_t *data, int len)
 	for(int i=0; i < len; i++) {
 		SDL_Delay(1);
 
-		if (prgData->verbose) {
+		if (unlikely(prgData->verbose)) {
 			printf("sending: %04x\n", data[i]);
 		}
 
@@ -810,47 +817,47 @@ void runStream(programData *data)
 		}
 
 		// Check for audio
-		if(data->audioFlag) {
+		if(likely(data->audioFlag)) {
 			r = SDLNet_UDP_Recv(data->audiosock, data->audpkg);
-			if(r==1) {
+			if(likely(r==1)) {
 
-				if(data->totalAdataBytes==0) {
+				if(unlikely(data->totalAdataBytes==0)) {
 					printf("Got data on audio port (%i) from %s:%i\n", data->listenaudio,
 						intToIp(data, data->audpkg->address.host), data->audpkg->address.port );
 				}
 				data->totalAdataBytes += sizeof(a64msg_t);
 
 				a64msg_t *a = (a64msg_t*)data->audpkg->data;
-				if(data->verbose) {
+				if(unlikely(data->verbose)) {
 					chkSeq(data, "UDP audio packet missed or out of order, last received: %i current %i\n", &lastAseq, a->seq);
 				}
 
-				if(data->afp && data->totalVdataBytes != 0 && data->totalAdataBytes != 0) {
+				if(unlikely(data->afp && data->totalVdataBytes != 0 && data->totalAdataBytes != 0)) {
 					fwrite(a->sample, SAMPLE_SIZE, 1, data->afp);
 				}
 
 				SDL_QueueAudio(data->dev, a->sample, SAMPLE_SIZE );
-			} else if(r == -1) {
+			} else if(unlikely(r == -1)) {
 				printf("SDLNet_UDP_Recv error: %s\n", SDLNet_GetError());
 			}
 		}
 
 		// Check for video
 		r = SDLNet_UDP_Recv(data->udpsock, data->pkg);
-		if(r==1 && !data->showHelp) {
-			if(data->totalVdataBytes==0) {
+		if(likely(r==1 && !data->showHelp)) {
+			if(unlikely(data->totalVdataBytes==0)) {
 				printf("Got data on video port (%i) from %s:%i\n", data->listen,
 				       intToIp(data, data->pkg->address.host), data->pkg->address.port );
 			}
 			data->totalVdataBytes += sizeof(u64msg_t);
 
 			u64msg_t *p = (u64msg_t*)data->pkg->data;
-			if(data->verbose) {
+			if(unlikely(data->verbose)) {
 				chkSeq(data, "UDP video packet missed or out of order, last received: %i current %i\n", &lastVseq, p->seq);
 			}
 
 			int y = p->line & 0b0111111111111111;
-			if(data->fast) {
+			if(likely(data->fast)) {
 				int lpp = p->linexInPacket;
 				int hppl =p->pixelsInLine/2;
 				for(int l=0; l < lpp; l++) {
@@ -880,15 +887,15 @@ void runStream(programData *data)
 					}
 				}
 			}
-			if(p->line & 0b1000000000000000) {
+			if(likely(p->line & 0b1000000000000000)) {
 				sync=1;
 				staleVideo=0;
 			}
-		} else if(r == -1) {
+		} else if(unlikely(r == -1)) {
 			printf("SDLNet_UDP_Recv error: %s\n", SDLNet_GetError());
 		} else {
 			staleVideo++;
-			if(staleVideo > 5) {
+			if(unlikely(staleVideo > 5)) {
 				if(staleVideo == 6) {
 					pic(data->tex, data->width, data->height, data->pitch, data->pixels);
 				} else if(staleVideo%10 == 0) {
@@ -897,10 +904,10 @@ void runStream(programData *data)
 			}
 		}
 
-		if(sync) {
+		if(likely(sync)) {
 			sync=0;
-			if(data->fast) {
-				if(data->vfp && data->totalVdataBytes != 0 && data->totalAdataBytes != 0) {
+			if(likely(data->fast)) {
+				if(unlikely(data->vfp && data->totalVdataBytes != 0 && data->totalAdataBytes != 0)) {
 					fwrite(data->pixels, sizeof(uint32_t)*data->width*data->height, 1, data->vfp);
 				}
 				SDL_UnlockTexture(data->tex);
