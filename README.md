@@ -1,3 +1,7 @@
+HALP
+===
+If you like my software, consider sending a few Dogecoin my way: DHu41ELvTho6SUiuNDnyQYdDmDrYiWZuvR
+
 WUT
 ===
 A viewer for the UDP VIC video streaming function in the Ultimate 64!
