@@ -226,6 +226,14 @@ void printColors(const uint64_t *red, const uint64_t *green, const uint64_t *blu
 
 }
 
+void printAudioSpec(SDL_AudioSpec* spec) {
+    printf("  Freq: %i\n  Format: %i\n  Channels: %i\n  Samples: %i\n"
+            ,spec->freq
+            ,spec->format
+            ,spec->channels
+            ,spec->samples);
+}
+
 int main(int argc, char** argv) {
 
 	SDL_Event event;
@@ -464,6 +472,13 @@ int main(int argc, char** argv) {
 		want.channels = 2;
 		want.samples = 192;
 		dev = SDL_OpenAudioDevice(NULL, 0, &want, &have, 0);
+
+        if(verbose) {
+            printf("Requested audio configuration:");
+            printAudioSpec(&want);
+            printf("Got audio configuration:");
+            printAudioSpec(&have);
+        }
 
 		if(dev==0) {
 			printf("Failed to open audio: %s", SDL_GetError());
