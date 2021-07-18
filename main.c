@@ -431,9 +431,6 @@ int main(int argc, char** argv) {
 		return 2;
 	}
 
-	if(hostName && startStreamOnStart) {
-		startStream(hostName);
-	}
 
 	set=SDLNet_AllocSocketSet(2);
 	if(!set) {
@@ -521,6 +518,12 @@ int main(int argc, char** argv) {
 	pic(tex, width, height, pitch, pixels);
 	int staleVideo=7;
 	int r;
+
+
+	if(hostName && startStreamOnStart) {
+		startStream(hostName);
+	}
+
 	while (run) {
 		while (SDL_PollEvent(&event)) {
 			switch (event.type) {
