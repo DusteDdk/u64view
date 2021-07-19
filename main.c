@@ -657,7 +657,7 @@ int main(int argc, char** argv) {
 			}
 		}
 
-		if(sync) {
+		if(sync && !(SDL_GetWindowFlags(win) & SDL_WINDOW_HIDDEN)) {
 			sync=0;
 			if(fast) {
 				if(vfp && totalVdataBytes != 0 && totalAdataBytes != 0) {
