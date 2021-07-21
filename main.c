@@ -141,7 +141,6 @@ void sendSequence(char *hostName, const uint8_t *data, int len) {
 		while( SDLNet_CheckSockets(set, 30) == 1 ) {
 			result = SDLNet_TCP_Recv(sock, &buf, 1023);
 			buf[result]=0;
-			//puts(buf); // debug, messes up terminal.
 		}
 	}
 
@@ -265,12 +264,14 @@ int main(int argc, char** argv) {
 	uint16_t lastAseq=0, lastVseq=0;
 	int stopStreamOnExit=1, showHelp=0, startStreamOnStart=1;
 
+    uint_fast8_t debug = 0;
+
 
 	printf("\nUltimate 64 view!\n-----------------\n  Try -h for options.\n\n");
 
 	for(int i=1; i < argc; i++) {
 		if(strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
-			printf("\nUsage: u64view [-z N |-f] [-s] [-v] [-V] [-c] [-m] [-t] [-T [RGB,...]] [-u IP | -U IP -I IP] [-o FN]\n"
+			printf("\nUsage: u64view [-z N |-f] [-s] [-v] [-V] [-c] [-m] [-t] [-T [RGB,...]] [-u IP | -U IP -I IP] [-o FN] [-d]\n"
 					"       -z N  (default 1)   Scale the window to N times size, N must be an integer.\n"
 					"       -f    (default off) Fullscreen, will stretch.\n"
 					"       -s    (default off) Prefer software rendering, more cpu intensive.\n"
@@ -283,7 +284,8 @@ int main(int argc, char** argv) {
 					"       -u IP (default off) Connect to Ultimate64 at IP and command it to start streaming Video and Audio.\n"
 					"       -U IP (default off) Same as -u but don't stop the streaming when u64view exits.\n"
 					"       -I IP (default off) Just know the IP, do nothing, so keys can be used for starting/stopping stream.\n"
-					"       -o FN (default off) Output raw ARGB to FN.rgb and PCM to FN.pcm (20 MiB/s, you disk must keep up or packets are dropped).\n\n");
+					"       -o FN (default off) Output raw ARGB to FN.rgb and PCM to FN.pcm (20 MiB/s, you disk must keep up or packets are dropped).\n"
+                    "       -d    (default off) Activate whatever debug code might be present in the current build.\n\n");
 					return 0;
 		} else if(strcmp(argv[i], "-z") == 0) {
 			if(i+1 < argc) {
@@ -408,6 +410,9 @@ int main(int argc, char** argv) {
 				return 1;
 			}
 			printf("Ultimate64 telnet interface at %s\n", hostName);
+        } else if(strcmp(argv[i], "-d") == 0) {
+            printf("Debug mode enabled.\n");
+            debug=1;
 		} else {
 			printf("Unknown option '%s', try -h\n", argv[i]);
 			return 1;
@@ -587,11 +592,20 @@ int main(int argc, char** argv) {
 				a64msg_t *a = (a64msg_t*)audpkg->data;
 				if(verbose) chkSeq("UDP audio packet missed or out of order, last received: %i current %i\n", &lastAseq, a->seq);
 
+
 				if(afp && totalVdataBytes != 0 && totalAdataBytes != 0) {
 					fwrite(a->sample, 192*4, 1, afp);
 				}
 
 				SDL_QueueAudio(dev, a->sample, 192*4 );
+
+                //Hack/test thing, try flushing the buffer if there are more packets waiting
+                if(debug) {
+                    while( SDLNet_UDP_Recv(audiosock, audpkg) == 1 )
+                    {
+                        printf("DEBUG: Skipping UDP audio data to avoid delayed audio.\n");
+                    }
+                }
 			} else if(r == -1) {
 				printf("SDLNet_UDP_Recv error: %s\n", SDLNet_GetError());
 			}
